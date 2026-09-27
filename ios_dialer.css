@@ -1,5 +1,24 @@
 @tailwind utilities;
 
+/* ==================== 本地字体支持 ====================
+ * 用法：把你的字体文件（.ttf / .woff2 / .otf）放到项目的 fonts/ 文件夹下，
+ * 然后在下方 @font-face 里取消对应注释即可。
+ * 如果 fonts/ 文件夹里没有对应文件，会自动回退到 Google Fonts（Inter + Noto Sans SC）。
+ *
+ * 示例（取消注释并修改文件名）：
+   @font-face {
+       font-family: 'MyLocalFont';
+       src: url('./fonts/YourFont-Regular.woff2') format('woff2'),
+            url('./fonts/YourFont-Regular.ttf') format('truetype');
+       font-weight: 400;
+       font-style: normal;
+       font-display: swap;
+   }
+ *
+ * 然后在 ios_dialer.html 的 tailwind.config.fontFamily.ios 里
+ * 把 'MyLocalFont' 放到数组最前面即可。
+ * ====================================================== */
+
 /* iOS拨号键盘样式 */
 .ios-key {
     @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
