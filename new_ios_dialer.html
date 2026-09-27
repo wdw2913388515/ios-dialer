@@ -1,0 +1,564 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0, maximum-scale=1.0, user-scalable=no">
+    <title>iOS风格拨号键盘</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <link href="https://cdn.jsdelivr.net/npm/font-awesome@4.7.0/css/font-awesome.min.css" rel="stylesheet">
+    
+    <!-- 配置Tailwind自定义颜色和字体 -->
+    <script>
+        tailwind.config = {
+            theme: {
+                extend: {
+                    colors: {
+                        iosGray: '#f5f5f7',
+                        iosKey: '#e0e0e0',
+                        iosText: '#000000',
+                        iosSecondText: '#8e8e93',
+                        iosHighlight: '#007aff',
+                        iosGreen: '#34c759',
+                        iosRed: '#ff3b30',
+                    },
+                    fontFamily: {
+                        ios: ['-apple-system', 'BlinkMacSystemFont', 'Segoe UI', 'Roboto', 'Helvetica Neue', 'Arial', 'sans-serif'],
+                    },
+                },
+            }
+        }
+    </script>
+    
+    <style type="text/tailwindcss">
+        @layer utilities {
+            .content-auto {
+                content-visibility: auto;
+            }
+            .ios-key {
+                @apply rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+                width: var(--button-size, 5rem);
+                height: var(--button-size, 5rem);
+            }
+            .ios-key-label {
+                @apply text-xs text-iosSecondText mt-0 leading-none;
+            }
+            .ios-key-zero {
+                @apply rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+                width: var(--button-size, 5rem);
+                height: var(--button-size, 5rem);
+            }
+            .dialer-container {
+                @apply w-full bg-iosGray min-h-screen flex flex-col items-center justify-start py-8 px-4;
+            }
+            .call-button {
+                @apply bg-iosGreen rounded-full flex items-center justify-center text-white font-ios text-2xl transition-all duration-150 active:bg-green-600 active:scale-95;
+                width: var(--button-size, 5rem);
+                height: var(--button-size, 5rem);
+            }
+            .key-pressed {
+                @apply bg-gray-400 scale-95;
+            }
+            .keyboard-grid {
+                @apply grid grid-cols-3 justify-items-center mx-auto;
+                width: fit-content;
+                gap: var(--button-gap, 0.75rem);
+            }
+            .add-number-text {
+                @apply text-iosHighlight text-sm font-bold mt-1 transition-opacity duration-300 opacity-0; /* 减少上边距 */
+            }
+            .add-number-text.visible {
+                @apply opacity-100;
+            }
+            .number-display-container {
+                @apply w-full flex justify-center items-center mb-0 -mt-[1.2cm];
+            }
+            .text-preview-container {
+                height: 2rem;
+                position: relative;
+                overflow: visible !important;
+            }
+            /* 大背景框 - 高于包含多个彩色文本块的框 */
+            .text-blocks-main-container {
+                width: 100%;
+                max-width: 380px;
+                padding: 0.75rem;
+                display: inline-block;
+                border-radius: 0.375rem;
+                
+                /* background-color: rgba(0, 0, 0, 0.05); */ /* 注释掉背景颜色 */
+                /* box-shadow: 0 2px 4px rgba(0, 0, 0, 0.1); */ /* 注释掉框子厚度效果 */
+                position: relative;
+                overflow: hidden;
+            }
+            /* 小文本块容器 - 居中显示 */
+            .text-blocks-inner-container {
+                display: flex;
+                justify-content: center;
+                align-items: center;
+                flex-wrap: nowrap;
+                position: relative;
+                white-space: nowrap;
+            }
+            /* 单个彩色文本块样式 */
+            .text-block-background {
+                padding: 0.5rem 1rem;
+                display: inline-block;
+                border-radius: 0.25rem;
+                margin: 0 0.25rem;
+            }
+            .number-display-wrapper {
+                @apply w-full px-4 py-3 h-[12rem] flex flex-col justify-center items-center touch-manipulation overflow-hidden;
+            }
+            
+            /* 确保额外文本框容器始终占用固定高度，无论是否显示 */
+            #extraTextFieldContainer {
+                @apply transition-opacity duration-300 h-[3rem] overflow-hidden;
+            }
+            .number-placeholder {
+                @apply text-4xl font-ios text-transparent leading-none min-h-[2.5rem];
+                content-visibility: auto;
+            }
+            .phone-number-container {
+                @apply w-full overflow-hidden flex justify-end py-0 -mx-4 px-4; /* 禁用自动滑动，改为overflow-hidden */
+                scrollbar-width: none; /* Firefox */
+                -ms-overflow-style: none; /* IE and Edge */
+                margin-top: 0.25rem; /* 减少元素间间距 */
+                margin-bottom: 0.25rem;
+            }
+            .phone-number-container::-webkit-scrollbar {
+                display: none; /* Chrome, Safari and Opera */
+            }
+            .phone-number-content {
+    @apply whitespace-nowrap text-4xl font-ios text-center min-w-full text-iosGreen;
+}
+
+/* 隐藏按钮字母的CSS类 */
+.hide-letters .ios-key-label {
+    display: none;
+}
+        }
+    </style>
+    
+    <!-- 引入数据管理器和主脚本 -->
+    <script src="./dialer_data_manager.js"></script>
+    <script src="./ios_dialer.js"></script>
+    
+    <!-- 按钮大小设置脚本 -->
+    <script>
+        // 初始化按钮大小设置
+        document.addEventListener('DOMContentLoaded', function() {
+            // 从localStorage加载按钮大小设置
+            const loadButtonSizeFromStorage = () => {
+                try {
+                    const savedSize = localStorage.getItem('iosDialerButtonSize');
+                    if (savedSize) {
+                        const size = parseInt(savedSize);
+                        // 应用按钮大小
+                        applyButtonSize(size);
+                    } else {
+                        // 使用默认大小80px
+                        applyButtonSize(80);
+                    }
+                } catch (error) {
+                    console.error('加载按钮大小设置失败:', error);
+                    // 出错时使用默认大小
+                    applyButtonSize(80);
+                }
+            };
+            
+            // 应用按钮大小到所有按钮
+            const applyButtonSize = (size) => {
+                // 转换为rem单位（1rem = 16px）
+                const sizeInRem = (size / 16) + 'rem';
+                
+                // 设置CSS变量
+                document.documentElement.style.setProperty('--button-size', sizeInRem);
+                
+                // 同时调整字体大小以保持比例（可选）
+                const fontSizeInRem = Math.max(1, size / 40) + 'rem';
+                const smallFontSizeInRem = Math.max(0.5, size / 80) + 'rem';
+                
+                // 应用到所有拨号按钮
+                document.querySelectorAll('.ios-key, .ios-key-zero').forEach(button => {
+                    button.style.fontSize = fontSizeInRem;
+                    const label = button.querySelector('.ios-key-label');
+                    if (label) {
+                        label.style.fontSize = smallFontSizeInRem;
+                    }
+                });
+                
+                // 应用到拨号按钮
+                const callButton = document.querySelector('.call-button');
+                if (callButton) {
+                    callButton.style.fontSize = fontSizeInRem;
+                }
+            };
+            
+            // 初始加载
+            loadButtonSizeFromStorage();
+            
+            // 监听存储变化（当在其他标签页修改设置时）
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'iosDialerButtonSize') {
+                    loadButtonSizeFromStorage();
+                }
+                if (event.key === 'iosDialerButtonHorizontalSpacing' || event.key === 'iosDialerButtonVerticalSpacing') {
+                    loadButtonSpacingFromStorage();
+                }
+            });
+        });
+        
+        // 按钮间距设置脚本
+        document.addEventListener('DOMContentLoaded', function() {
+            // 从localStorage加载按钮间距设置
+            const loadButtonSpacingFromStorage = () => {
+                try {
+                    const savedHorizontal = localStorage.getItem('iosDialerButtonHorizontalSpacing');
+                    const savedVertical = localStorage.getItem('iosDialerButtonVerticalSpacing');
+                    
+                    // 使用默认值或保存的值
+                    const horizontalSpacing = savedHorizontal ? parseInt(savedHorizontal) : 16;
+                    const verticalSpacing = savedVertical ? parseInt(savedVertical) : 12;
+                    
+                    // 应用按钮间距
+                    applyButtonSpacing(horizontalSpacing, verticalSpacing);
+                } catch (error) {
+                    console.error('加载按钮间距设置失败:', error);
+                    // 出错时使用默认间距
+                    applyButtonSpacing(16, 12);
+                }
+            };
+            
+            // 应用按钮间距到键盘网格
+            const applyButtonSpacing = (horizontalSpacing, verticalSpacing) => {
+                // 转换为rem单位（1rem = 16px）
+                const horizontalInRem = (horizontalSpacing / 16) + 'rem';
+                const verticalInRem = (verticalSpacing / 16) + 'rem';
+                
+                // 设置CSS变量
+                document.documentElement.style.setProperty('--button-gap', `${verticalInRem} ${horizontalInRem}`);
+            };
+            
+            // 从localStorage加载隐藏字母设置
+            const loadHideLettersFromStorage = () => {
+                try {
+                    const hideLetters = localStorage.getItem('iosDialerHideNewWebsite2Letters') === 'true';
+                    const keyboardGrid = document.querySelector('.keyboard-grid');
+                    if (keyboardGrid) {
+                        if (hideLetters) {
+                            keyboardGrid.classList.add('hide-letters');
+                        } else {
+                            keyboardGrid.classList.remove('hide-letters');
+                        }
+                    }
+                } catch (error) {
+                    console.error('加载隐藏字母设置失败:', error);
+                }
+            };
+            
+            // 初始加载
+            loadButtonSpacingFromStorage();
+            loadHideLettersFromStorage();
+            
+            // 监听存储变化（当在其他标签页修改设置时）
+            window.addEventListener('storage', function(event) {
+                if (event.key === 'iosDialerButtonHorizontalSpacing' || event.key === 'iosDialerButtonVerticalSpacing') {
+                    loadButtonSpacingFromStorage();
+                }
+                if (event.key === 'iosDialerHideNewWebsite2Letters') {
+                    loadHideLettersFromStorage();
+                }
+            });
+        });
+    </script>
+</head>
+<body>
+    <div class="dialer-container">
+        <!-- 文本效果预览区域 -->
+        <div id="textPreviewArea" class="text-preview-container mb-4">
+            <!-- 文本内容将通过JavaScript动态生成 -->
+        </div>
+        
+        <!-- 电话号码显示区域 - 增强预占位功能和溢出处理 -->
+        <div class="number-display-container">
+            <div id="phoneNumberWrapper" class="number-display-wrapper">
+                <!-- 新增的额外文本框 -->
+                <div id="extraTextFieldContainer" class="phone-number-container overflow-hidden">
+                    <div id="extraTextFieldContent" class="phone-number-content whitespace-normal">
+                        <span id="extraTextField"> </span>
+                    </div>
+                </div>
+                
+                <!-- 修改电话号码显示区域的CSS样式，支持自动换行 -->
+                <div id="phoneNumberContainer" class="phone-number-container overflow-hidden">
+                    <div id="phoneNumberContent" class="phone-number-content whitespace-normal">
+                        <span id="numberDisplay" style="color: #34c759;"> </span>
+                        <span id="numberPlaceholder" class="number-placeholder">8888888888</span>
+                    </div>
+                </div>
+                <div id="addNumberText" class="add-number-text">添加号码</div>
+            </div>
+        </div>
+        
+        <!-- 拨号键盘 - 使用优化的居中网格 -->
+        <!-- 修改前 -->
+        
+        <div class="keyboard-grid mb-8">
+            <!-- 第一行 -->
+            <div data-key="1" class="ios-key">1
+                <div class="ios-key-label">阿凸目</div>
+            </div>
+            <div data-key="2" class="ios-key">2
+                <div class="ios-key-label">ABC</div>
+            </div>
+            <div data-key="3" class="ios-key">3
+                <div class="ios-key-label">DEF</div>
+            </div>
+            
+            <!-- 第二行 -->
+            <div data-key="4" class="ios-key">4
+                <div class="ios-key-label">GHI</div>
+            </div>
+            <div data-key="5" class="ios-key">5
+                <div class="ios-key-label">JKL</div>
+            </div>
+            <div data-key="6" class="ios-key">6
+                <div class="ios-key-label">MNO</div>
+            </div>
+            
+            <!-- 第三行 -->
+            <div data-key="7" class="ios-key">7
+                <div class="ios-key-label">PQRS</div>
+            </div>
+            <div data-key="8" class="ios-key">8
+                <div class="ios-key-label">TUV</div>
+            </div>
+            <div data-key="9" class="ios-key">9
+                <div class="ios-key-label">WXYZ</div>
+            </div>
+            
+            <!-- 第四行 -->
+            <div data-key="*" class="ios-key">*</div>
+            <div data-key="0" class="ios-key-zero">0
+                <div class="ios-key-label">+</div>
+            </div>
+            <div data-key="#" class="ios-key">#</div>
+        </div>
+        
+        <!-- 拨号按钮 -->
+        <div class="flex justify-center -mt-[0.5cm]">
+            <div id="callButton">
+                <div class="call-button">
+                    <i class="fa fa-phone"></i>
+                </div>
+            </div>
+        </div>
+    </div>
+</body>
+</html>
+
+        <script>
+            // 全局变量用于跟踪额外文本框当前已显示的字符数
+            window.extraTextFieldDisplayedLength = 0;
+            // 全局变量用于跟踪额外文本块当前已显示的字符数
+            window.extraTextBlocksDisplayedLength = 0;
+            
+            // 页面加载时检查是否显示额外文本框
+            document.addEventListener('DOMContentLoaded', function() {
+                const showExtraTextField = localStorage.getItem('dialerShowExtraTextField') === 'true';
+                const extraTextFieldContainer = document.getElementById('extraTextFieldContainer');
+                
+                if (extraTextFieldContainer) {
+                    // 设置透明度而不是使用hidden类
+                    extraTextFieldContainer.style.opacity = showExtraTextField ? '1' : '0';
+                    
+                    if (showExtraTextField) {
+                        // 从数据管理器获取额外文本框的内容
+                        if (window.dialerDataManager) {
+                            const content = window.dialerDataManager.getExtraTextFieldContent() || '歌词文本一二三';
+                            
+                            // 检查是否启用了打字模式
+                            const isTypingMode = window.dialerDataManager.getExtraTextFieldTypingMode() || false;
+                            
+                            if (isTypingMode) {
+                                // 打字模式开启时，初始只显示空字符串
+                                document.getElementById('extraTextField').textContent = '';
+                                window.extraTextFieldDisplayedLength = 0;
+                            } else {
+                                // 打字模式关闭时，显示内容并应用字数限制
+                                let displayContent = content;
+                                
+                                // 使用数据管理器处理文本溢出效果
+                                if (window.dialerDataManager && window.dialerDataManager.handleTextOverflow) {
+                                    displayContent = window.dialerDataManager.handleTextOverflow(displayContent);
+                                } else {
+                                    // 如果数据管理器不可用，使用默认的字数限制
+                                    if (displayContent.length > 12) {
+                                        displayContent = '...' + displayContent.substring(displayContent.length - 9);
+                                    }
+                                }
+                                
+                                document.getElementById('extraTextField').textContent = displayContent;
+                                window.extraTextFieldDisplayedLength = content.length;
+                            }
+                            
+                            // 应用样式设置
+                            if (window.dialerDataManager && window.dialerDataManager.getExtraTextFieldStyle) {
+                                const style = window.dialerDataManager.getExtraTextFieldStyle();
+                                const extraTextField = document.getElementById('extraTextField');
+                                if (style && extraTextField) {
+                                    if (style.fontSize) extraTextField.style.fontSize = style.fontSize + 'px';
+                                    if (style.fontWeight) extraTextField.style.fontWeight = style.fontWeight;
+                                    if (style.color) extraTextField.style.color = style.color;
+                                }
+                            }
+                        } else {
+                            // 如果数据管理器不可用，使用默认值
+                            document.getElementById('extraTextField').textContent = '歌词文本一二三';
+                            window.extraTextFieldDisplayedLength = 7; // 默认文本长度
+                            
+                            // 使用默认样式设置
+                            const extraTextField = document.getElementById('extraTextField');
+                            if (extraTextField) {
+                                extraTextField.style.fontSize = '24px';
+                                extraTextField.style.fontWeight = 'normal';
+                                extraTextField.style.color = '#000000';
+                            }
+                        }
+                    }
+                }
+                
+                // 初始化额外文本块的显示状态
+                if (window.dialerDataManager) {
+                    const isTextBlocksTypingMode = window.dialerDataManager.getExtraTextBlocksTypingMode() || false;
+                    const textPreviewArea = document.getElementById('textPreviewArea');
+                    
+                    if (textPreviewArea) {
+                        if (isTextBlocksTypingMode) {
+                            // 打字模式开启时，清空预览区域
+                            textPreviewArea.innerHTML = '';
+                            window.extraTextBlocksDisplayedLength = 0;
+                        } else {
+                            // 打字模式关闭时，直接加载全部文本预览
+                            loadTextPreview();
+                            // 计算所有文本块的总字符数
+                            const extraTextBlocks = window.dialerDataManager.getExtraTextBlocks() || [];
+                            let totalCharacters = 0;
+                            extraTextBlocks.forEach(block => {
+                                if (block.text) {
+                                    totalCharacters += block.text.length;
+                                }
+                            });
+                            window.extraTextBlocksDisplayedLength = totalCharacters;
+                        }
+                    }
+                } else {
+                    // 如果数据管理器不可用，直接加载文本预览
+                    loadTextPreview();
+                    window.extraTextBlocksDisplayedLength = 100; // 设为一个较大的值，表示全部显示
+                }
+            });
+        
+            // 加载并显示文本效果预览
+            loadTextPreview();
+        
+        
+        // 加载并显示文本效果预览
+        function loadTextPreview() {
+            const textPreviewArea = document.getElementById('textPreviewArea');
+            if (!textPreviewArea) return;
+            
+            // 清空预览区域
+            textPreviewArea.innerHTML = '';
+            
+            // 从数据管理器获取额外文本块数据
+            if (window.dialerDataManager) {
+                const extraTextBlocks = window.dialerDataManager.getExtraTextBlocks();
+                
+                // 获取样式设置
+                const styleSettings = window.dialerDataManager.getExtraTextFieldStyle() || {};
+                const fontSize = (styleSettings.fontSize || 18) + 'px';
+                const fontWeight = styleSettings.fontWeight || 'normal';
+                
+                // 检查是否显示彩色文字
+                const showColors = window.dialerDataManager.getExtraTextBlocksShowColors ? 
+                    window.dialerDataManager.getExtraTextBlocksShowColors() : false;
+                
+                // 根据showColors状态设置预览区域的透明度
+                textPreviewArea.style.opacity = showColors ? '1' : '0';
+                
+                // 创建并添加文本块
+            if (extraTextBlocks && extraTextBlocks.length > 0) {
+                // 创建大背景框容器
+                const mainContainer = document.createElement('div');
+                mainContainer.className = 'text-blocks-main-container';
+                
+                // 创建居中的内部容器
+                const innerContainer = document.createElement('div');
+                innerContainer.className = 'text-blocks-inner-container';
+                
+                // 获取所有文本块的文本内容
+                let allText = '';
+                const allBlocks = extraTextBlocks.map(block => ({...block})); // 复制数组以避免修改原始数据
+                
+                allBlocks.forEach(block => {
+                    if (block.text) {
+                        allText += block.text;
+                    }
+                });
+                
+                // 检查是否需要应用溢出处理
+                if (window.dialerDataManager && window.dialerDataManager.handleExtraTextBlocksOverflow && allText.length > 0) {
+                    // 获取完整的溢出处理后的文本
+                    const processedText = window.dialerDataManager.handleExtraTextBlocksOverflow(allText);
+                    
+                    // 如果处理后的文本以省略号开头，说明发生了溢出
+                    if (processedText.startsWith('...')) {
+                        // 计算需要显示的文本
+                        const visibleText = processedText.substring(3); // 移除开头的省略号
+                        
+                        // 清空allBlocks数组，准备创建新的文本块
+                        allBlocks.length = 0;
+                        
+                        // 创建一个新的文本块，包含溢出处理后的文本
+                        allBlocks.push({
+                            text: processedText, // 包含省略号的完整文本
+                            color: extraTextBlocks[0]?.color || '#000000' // 使用第一个文本块的颜色或默认颜色
+                        });
+                    }
+                }
+                
+                // 创建文本块元素
+                allBlocks.forEach(block => {
+                    if (block.text) {
+                        // 创建单个文本块的背景div
+                        const backgroundDiv = document.createElement('div');
+                        backgroundDiv.className = 'text-block-background';
+                        backgroundDiv.style.backgroundColor = block.color ? block.color + '20' : '#00000020'; // 使用颜色的半透明版本
+                        
+                        // 创建文本span元素
+                        const textSpan = document.createElement('span');
+                        textSpan.textContent = block.text;
+                        textSpan.style.color = block.color || '#000000';
+                        textSpan.style.fontSize = fontSize;
+                        textSpan.style.fontWeight = fontWeight;
+                        textSpan.style.display = 'block';
+                        textSpan.style.textAlign = 'center'; // 文本居中显示
+                        
+                        // 将文本span添加到背景div中
+                        backgroundDiv.appendChild(textSpan);
+                        // 将背景div添加到内部居中容器
+                        innerContainer.appendChild(backgroundDiv);
+                    }
+                });
+                
+                // 添加内部容器到大背景框
+                mainContainer.appendChild(innerContainer);
+                
+                // 将大背景框添加到预览区域
+                textPreviewArea.appendChild(mainContainer);
+                    }
+                }
+            }
+        
+        </script>
