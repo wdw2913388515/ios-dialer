@@ -110,10 +110,11 @@ class DialerDataManager {
           // 初始化添加号码文字内容设置
         
         // 初始化拨号数字颜色序列设置（逐个显示的数字颜色循环）
+        // 默认全部为黑色，与 resetNumberColorSequence 保持一致
         this.numberColorSequence = this.loadNumberColorSequence() || [
-            { id: 1, color: '#FF0000' }, // 默认红色
-            { id: 2, color: '#FFFF00' }, // 默认黄色
-            { id: 3, color: '#0000FF' }  // 默认蓝色
+            { id: 1, color: '#000000' }, // 默认黑色
+            { id: 2, color: '#000000' }, // 默认黑色
+            { id: 3, color: '#000000' }  // 默认黑色
         ];
         // 初始化数字颜色序列整体透明度设置
         const loadedOpacity = this.loadNumberColorSequenceOpacity();

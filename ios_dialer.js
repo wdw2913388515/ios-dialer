@@ -1783,8 +1783,12 @@ function initDialer() {
                 else if (keyValue === '0') audioFileName = '11';
                 else if (keyValue === '#') audioFileName = '12';
                 
-                // 构建音频文件路径，使用绝对路径确保能正确加载
-                const audioPath = `/Users/pra/ShiYongTrae/xinWenJian/wav001/${audioFileName}.wav`;
+                // 构建音频文件路径：使用相对路径，确保本地和部署后都能加载
+                // audioFolder 默认 'wav001'，对应项目根目录下的 wav001/ 文件夹
+                let audioPath = `./${audioFolder}/${audioFileName}.${extension}`;
+                
+                // 调试日志：输出当前使用的音频路径（F12 Console 可查看）
+                console.log(`[音效] folder=${audioFolder} file=${audioFileName}.${extension} path=${audioPath}`);
                 
                 // 检查并管理活跃音频数量
                 if (activeAudios.length >= maxConcurrentAudios) {
@@ -1811,7 +1815,21 @@ function initDialer() {
                 // 检查缓存中是否已有该音频
                 if (!audioCache[audioPath]) {
                     // 创建新的Audio对象并添加到缓存
-                    audioCache[audioPath] = new Audio(audioPath);
+                    const newAudio = new Audio(audioPath);
+                    // 监听加载错误，若失败则回退到默认 wav001 文件夹
+                    newAudio.addEventListener('error', function() {
+                        console.warn(`[音效] 加载失败: ${audioPath}，尝试回退到 wav001`);
+                        const fallbackPath = `./wav001/${audioFileName}.wav`;
+                        if (!audioCache[fallbackPath]) {
+                            const fallbackAudio = new Audio(fallbackPath);
+                            fallbackAudio.addEventListener('error', () => {
+                                console.error(`[音效] 回退也失败: ${fallbackPath}，请检查 wav001 文件夹是否已部署`);
+                            });
+                            audioCache[fallbackPath] = fallbackAudio;
+                        }
+                        audioCache[audioPath] = audioCache[fallbackPath];
+                    });
+                    audioCache[audioPath] = newAudio;
                 }
                 
                 // 获取缓存的音频对象
@@ -1829,8 +1847,10 @@ function initDialer() {
                 audio.volume = 1.0;
                 
                 // 播放音频
-                audio.play().catch(error => {
-                    console.error('音频播放失败:', error);
+                audio.play().then(() => {
+                    console.log(`[音效] 播放成功: ${audioPath}`);
+                }).catch(error => {
+                    console.error('[音效] 播放失败:', error, '路径:', audioPath);
                 });
                 
                 // 设置定时器，确保音频在配置的淡出时间后淡出并停止
@@ -1921,7 +1941,9 @@ function initDialer() {
     keyElements.forEach(key => {
         // 使用touchstart而不是click，以更好地控制长按行为
         key.addEventListener('touchstart', function(e) {
-            // 不要阻止默认行为，以允许多点触摸
+            // 阻止默认行为：防止浏览器合成 mousedown 事件（避免重复输入）、
+            // 防止长按弹出选择/复制菜单、防止页面滚动
+            e.preventDefault();
             const keyValue = this.getAttribute('data-key');
             
             // 检查键是否已经被按下，防止长按重复输入
@@ -1937,7 +1959,10 @@ function initDialer() {
         
         // 对于桌面设备，仍使用mousedown和mouseup事件以提供更好的交互体验
         key.addEventListener('mousedown', function(e) {
-            // 不要阻止默认行为，以允许多键同时按下
+            // 跳过由触摸事件合成的鼠标事件（触摸设备已在 touchstart 中处理）
+            if (e.sourceCapabilities && e.sourceCapabilities.firesTouchEvents) {
+                return;
+            }
             const keyValue = this.getAttribute('data-key');
             
             // 检查键是否已经被按下，防止长按重复输入

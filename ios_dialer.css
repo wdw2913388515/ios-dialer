@@ -1,5 +1,24 @@
 @tailwind utilities;
 
+/* ==================== 移动端交互优化 ====================
+ * 禁用拨号页所有可交互元素的文本选择和长按菜单，
+ * 防止移动设备长按按钮/号码时弹出「选择/复制/搜索」菜单
+ * ====================================================== */
+.ios-key,
+.ios-key-zero,
+.ios-key-delete,
+#numberDisplay,
+#extraTextField,
+.call-button,
+#deleteButton {
+    -webkit-user-select: none;
+    -moz-user-select: none;
+    -ms-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
+}
+
 /* ==================== 本地字体支持 ====================
  * 用法：把你的字体文件（.ttf / .woff2 / .otf）放到项目的 fonts/ 文件夹下，
  * 然后在下方 @font-face 里取消对应注释即可。
@@ -22,6 +41,11 @@
 /* iOS拨号键盘样式 */
 .ios-key {
     @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    /* 防止移动端长按选中文字、弹出复制/搜索菜单 */
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .ios-key-label {
@@ -30,10 +54,18 @@
 
 .ios-key-zero {
     @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .ios-key-delete {
     @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosHighlight font-ios font-medium text-2xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    -webkit-user-select: none;
+    user-select: none;
+    -webkit-touch-callout: none;
+    -webkit-tap-highlight-color: transparent;
 }
 
 .dialer-container {
