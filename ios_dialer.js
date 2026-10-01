@@ -1458,55 +1458,49 @@ function applyDefaultColors() {
     function createRipple(keyElement, x, y) {
         const cfg = getRippleConfig();
         if (!cfg.enabled || !keyElement) return;
-        // 按钮需要 relative 定位作为波纹定位的参照
-        const pos = getComputedStyle(keyElement).position;
-        if (pos === 'static') keyElement.style.position = 'relative';
-        // 允许波纹超出按钮范围（波纹在按钮后面扩散到按钮外）
-        keyElement.style.overflow = 'visible';
-        // 波纹起始尺寸 = 按钮直径，放大后通过 scale 放大到 maxScale
+        console.log('[模式8·水波纹] 触发', cfg);
+        // 按钮直径作为波纹起始尺寸
         const size = Math.max(keyElement.offsetWidth, keyElement.offsetHeight);
-        // 颜色转半透明（hex → rgba，alpha=0.5；已是 rgba 则直接用）
+        // 计算按钮中心在视口中的坐标（fixed 定位用视口坐标）
+        const rect = keyElement.getBoundingClientRect();
+        const cx = rect.left + x;  // x 是相对于按钮的坐标
+        const cy = rect.top + y;
+        // 颜色转半透明
         let rippleColor = cfg.color;
         if (/^#/.test(rippleColor)) {
             rippleColor = hexToRgba(rippleColor, 0.5);
         }
-        // 注入 keyframes（每个配置组合唯一，避免重复注入）
+        // 注入 keyframes
         const animName = 'dialerRippleAnim_' + cfg.duration + '_' + cfg.maxScale;
-        const styleId = 'dialerRippleKeyframes';
-        if (!document.getElementById(styleId)) {
-            const st = document.createElement('style');
-            st.id = styleId;
-            st.textContent = '';
-            document.head.appendChild(st);
+        let styleTag = document.getElementById('dialerRippleKeyframes');
+        if (!styleTag) {
+            styleTag = document.createElement('style');
+            styleTag.id = 'dialerRippleKeyframes';
+            document.head.appendChild(styleTag);
         }
-        const styleTag = document.getElementById(styleId);
-        const keyframes = `
-            @keyframes ${animName} {
-                0%   { transform: scale(1);   opacity: 0;   box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
-                30%  { transform: scale(${1 + (cfg.maxScale - 1) * 0.3}); opacity: 1; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
-                100% { transform: scale(${cfg.maxScale}); opacity: 0;   box-shadow: 0 0 0 0px ${rippleColor}; }
-            }
-        `;
-        // 已存在同名动画则不重复写入
-        if (!styleTag.textContent.includes('@keyframes ' + animName)) {
-            styleTag.textContent += keyframes;
+        if (!styleTag.textContent.includes('@keyframes ' + animName + ' ')) {
+            styleTag.textContent += `\n@keyframes ${animName} {
+                0%   { transform: translate(-50%,-50%) scale(1); opacity: 0; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
+                30%  { transform: translate(-50%,-50%) scale(${1 + (cfg.maxScale - 1) * 0.3}); opacity: 1; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
+                100% { transform: translate(-50%,-50%) scale(${cfg.maxScale}); opacity: 0; box-shadow: 0 0 0 0px ${rippleColor}; }
+            }\n`;
         }
         const ripple = document.createElement('span');
         ripple.className = 'dialer-ripple';
+        // position:fixed 挂到 body，left/top 为视口坐标，用 translate(-50%,-50%) 居中到点击点
         ripple.style.cssText = [
-            'position:absolute',
-            'border-radius:50%',
+            'position:fixed',
+            'left:' + cx + 'px',
+            'top:' + cy + 'px',
             'width:' + size + 'px',
             'height:' + size + 'px',
-            'left:' + (x - size / 2) + 'px',
-            'top:' + (y - size / 2) + 'px',
-            'background:transparent',                     // 内部透明
+            'border-radius:50%',
+            'background:transparent',
             'pointer-events:none',
-            'z-index:-1',                                // 在按钮图层后面
+            'z-index:9999',
             'animation:' + animName + ' ' + cfg.duration + 'ms ease-out forwards'
         ].join(';');
-        keyElement.appendChild(ripple);
-        // 动画结束后移除波纹节点
+        document.body.appendChild(ripple);
         setTimeout(function () {
             if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
         }, cfg.duration + 50);
