@@ -753,6 +753,7 @@ const TouchSizeController = (function () {
                     btnDur: parseInt(p.btnDur) || 180,
                     objectFit: validFit.includes(p.objectFit) ? p.objectFit : 'cover',
                     outsideFit: p.outsideFit === 'height' ? 'height' : 'width',  // 新增：默认宽对齐
+                    shadowEnabled: p.shadowEnabled !== false,
                     shadowColor: p.shadowColor || '#ff6b35',
                     shadowBlur: parseInt(p.shadowBlur) || 24,
                     shadowOpacity: parseFloat(p.shadowOpacity) || 0.6,
@@ -762,7 +763,7 @@ const TouchSizeController = (function () {
             }
         } catch (e) {}
         return { fadeIn: 200, fadeOut: 200, btnDur: 180, objectFit: 'cover',
-            outsideFit: 'width', shadowColor: '#ff6b35', shadowBlur: 24, shadowOpacity: 0.6,
+            outsideFit: 'width', shadowEnabled: false, shadowColor: '#ff6b35', shadowBlur: 24, shadowOpacity: 0.6,
             shadowFadeIn: 150, shadowFadeOut: 150 };
     }
 
@@ -786,6 +787,11 @@ const TouchSizeController = (function () {
     function applyBtnShadow(btnEl, hasImage) {
         if (!btnEl) return;
         const p = getCharImgParams();
+        // 阴影总开关关闭：清除阴影并返回
+        if (p.shadowEnabled === false) {
+            btnEl.style.boxShadow = '';
+            return;
+        }
         // outside 模式且本次有图片叠加：阴影跟随图片 overlay，按钮不另加
         if (p.objectFit === 'outside' && hasImage) {
             return;
@@ -878,7 +884,7 @@ const TouchSizeController = (function () {
                 'z-index: 60',
                 'opacity: 0',
                 `transition: opacity ${params.fadeIn}ms ease`,
-                'box-shadow: 0 0 8px rgba(0,0,0,0.2)',
+                params.shadowEnabled !== false ? 'box-shadow: 0 0 8px rgba(0,0,0,0.2)' : '',
                 '-webkit-user-drag: none',
                 'user-select: none',
             ].join(';');
@@ -931,7 +937,7 @@ const TouchSizeController = (function () {
 
         // ===== 阴影参数只影响 box-shadow，彻底不参与尺寸计算 =====
         let outsideShadow = '';
-        if (params.shadowBlur > 0 && params.shadowOpacity > 0) {
+        if (params.shadowEnabled !== false && params.shadowBlur > 0 && params.shadowOpacity > 0) {
             const color = hexToRgba(params.shadowColor, params.shadowOpacity);
             outsideShadow = `box-shadow: 0 0 ${params.shadowBlur}px ${color};`;
         }
@@ -1316,6 +1322,202 @@ function applyDefaultColors() {
             }
         } catch (e) {}
     }, 1000);
+
+    /* ==================== 模式7：按钮 GIF 弹出效果 ==================== */
+    /**
+     * 读取模式7配置（默认关闭）
+     * @returns {{enabled:boolean, gifDataUrl:string, loop:'infinite'|'once', scale:number, position:'center'|'top'|'bottom', onceDuration:number}}
+     */
+    function getGifPopupConfig() {
+        try {
+            const raw = localStorage.getItem('dialerButtonGifPopup');
+            if (raw) {
+                const p = JSON.parse(raw);
+                return {
+                    enabled: !!p.enabled,
+                    gifDataUrl: p.gifDataUrl || '',
+                    loop: p.loop === 'once' ? 'once' : 'infinite',
+                    scale: (p.scale > 0) ? parseFloat(p.scale) : 1.5,
+                    position: ['center', 'top', 'bottom'].includes(p.position) ? p.position : 'center',
+                    onceDuration: (p.onceDuration > 0) ? parseInt(p.onceDuration) : 1200
+                };
+            }
+        } catch (e) {}
+        return { enabled: false, gifDataUrl: '', loop: 'infinite', scale: 1.5, position: 'center', onceDuration: 1200 };
+    }
+
+    /**
+     * 在按钮上弹出 GIF 动画（position:fixed 挂载到 body，不受父级裁切）
+     * @param {HTMLElement} keyElement - 被按下的按钮元素
+     */
+    function showGifPopup(keyElement) {
+        const cfg = getGifPopupConfig();
+        if (!cfg.enabled || !cfg.gifDataUrl) return;
+        // 先清理该按钮已有的 GIF（避免快速连按堆积）
+        hideGifPopup(keyElement);
+        const rect = keyElement.getBoundingClientRect();
+        const size = Math.max(rect.width, rect.height) * cfg.scale;
+        const overlay = document.createElement('img');
+        overlay.src = cfg.gifDataUrl;
+        overlay.dataset.forGifBtn = keyElement.getAttribute('data-key') || '';
+        overlay.style.cssText = [
+            'position:fixed',
+            'width:' + size + 'px',
+            'height:' + size + 'px',
+            'object-fit:contain',
+            'pointer-events:none',
+            'z-index:99998',
+            'opacity:0',
+            'transition:opacity .15s ease'
+        ].join(';');
+        // 位置：center=按钮正中央对齐, top=按钮上方, bottom=按钮下方
+        let top, left;
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        if (cfg.position === 'top') {
+            top = rect.top - size - 8;
+        } else if (cfg.position === 'bottom') {
+            top = rect.bottom + 8;
+        } else {
+            top = centerY - size / 2;
+        }
+        left = centerX - size / 2;
+        overlay.style.left = left + 'px';
+        overlay.style.top = top + 'px';
+        document.body.appendChild(overlay);
+        // 淡入
+        requestAnimationFrame(function () { overlay.style.opacity = '1'; });
+        // 注意：once 模式下不再在此自动隐藏——只要手指/鼠标未松开，GIF 一直完整显示；
+        // 松手后由 hideGifPopup 根据 onceDuration 延迟淡出。
+    }
+
+    /**
+     * 隐藏按钮上的 GIF 动画
+     * - infinite 模式：立即淡出（松手即消失）
+     * - once 模式：松手后延迟 onceDuration ms 再淡出（按住时一直显示完整 GIF）
+     * @param {HTMLElement} keyElement - 被按下的按钮元素
+     */
+    function hideGifPopup(keyElement) {
+        const cfg = getGifPopupConfig();
+        const key = keyElement.getAttribute('data-key') || '';
+        const list = document.querySelectorAll('img[data-for-gif-btn="' + key + '"]');
+        list.forEach(function (el) {
+            // 清理之前的待隐藏定时器（防止重复触发）
+            if (el._gifOnceTimer) { clearTimeout(el._gifOnceTimer); el._gifOnceTimer = null; }
+            if (el._removing) return;
+            // 执行淡出的闭包
+            const doFadeOut = function () {
+                el._removing = true;
+                el.style.opacity = '0';
+                setTimeout(function () { if (el.parentNode) el.parentNode.removeChild(el); }, 160);
+            };
+            if (cfg.loop === 'once') {
+                // once 模式：松手后延迟 onceDuration 再淡出
+                el._gifOnceTimer = setTimeout(doFadeOut, cfg.onceDuration);
+            } else {
+                // infinite 模式：立即淡出
+                doFadeOut();
+            }
+        });
+    }
+
+    // 跨标签页同步
+    window.addEventListener('storage', function (e) {
+        if (e.key === 'dialerButtonGifPopup') {
+            // 配置变化无需立即操作 DOM，下次按键时重新读取即可
+        }
+    });
+
+    /* ==================== 模式8：按钮水波纹特效 ==================== */
+    /**
+     * 读取模式8配置（默认关闭）
+     * @returns {{enabled:boolean, color:string, duration:number, maxScale:number}}
+     */
+    function getRippleConfig() {
+        try {
+            const raw = localStorage.getItem('dialerButtonRipple');
+            if (raw) {
+                const p = JSON.parse(raw);
+                return {
+                    enabled: !!p.enabled,
+                    color: p.color || 'rgba(255,255,255,0.5)',
+                    duration: (p.duration > 0) ? parseInt(p.duration) : 600,
+                    maxScale: (p.maxScale > 0) ? parseFloat(p.maxScale) : 4
+                };
+            }
+        } catch (e) {}
+        return { enabled: false, color: 'rgba(255,255,255,0.5)', duration: 600, maxScale: 4 };
+    }
+
+    /**
+     * 在按钮指定位置生成水波纹扩散动画
+     * @param {HTMLElement} keyElement - 被按下的按钮
+     * @param {number} x - 相对于按钮的点击 x 坐标
+     * @param {number} y - 相对于按钮的点击 y 坐标
+     */
+    function createRipple(keyElement, x, y) {
+        const cfg = getRippleConfig();
+        if (!cfg.enabled || !keyElement) return;
+        // 按钮需要 relative 定位作为波纹定位的参照
+        const pos = getComputedStyle(keyElement).position;
+        if (pos === 'static') keyElement.style.position = 'relative';
+        // 允许波纹超出按钮范围（波纹在按钮后面扩散到按钮外）
+        keyElement.style.overflow = 'visible';
+        // 波纹起始尺寸 = 按钮直径，放大后通过 scale 放大到 maxScale
+        const size = Math.max(keyElement.offsetWidth, keyElement.offsetHeight);
+        // 颜色转半透明（hex → rgba，alpha=0.5；已是 rgba 则直接用）
+        let rippleColor = cfg.color;
+        if (/^#/.test(rippleColor)) {
+            rippleColor = hexToRgba(rippleColor, 0.5);
+        }
+        // 注入 keyframes（每个配置组合唯一，避免重复注入）
+        const animName = 'dialerRippleAnim_' + cfg.duration + '_' + cfg.maxScale;
+        const styleId = 'dialerRippleKeyframes';
+        if (!document.getElementById(styleId)) {
+            const st = document.createElement('style');
+            st.id = styleId;
+            st.textContent = '';
+            document.head.appendChild(st);
+        }
+        const styleTag = document.getElementById(styleId);
+        const keyframes = `
+            @keyframes ${animName} {
+                0%   { transform: scale(1);   opacity: 0;   box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
+                30%  { transform: scale(${1 + (cfg.maxScale - 1) * 0.3}); opacity: 1; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
+                100% { transform: scale(${cfg.maxScale}); opacity: 0;   box-shadow: 0 0 0 0px ${rippleColor}; }
+            }
+        `;
+        // 已存在同名动画则不重复写入
+        if (!styleTag.textContent.includes('@keyframes ' + animName)) {
+            styleTag.textContent += keyframes;
+        }
+        const ripple = document.createElement('span');
+        ripple.className = 'dialer-ripple';
+        ripple.style.cssText = [
+            'position:absolute',
+            'border-radius:50%',
+            'width:' + size + 'px',
+            'height:' + size + 'px',
+            'left:' + (x - size / 2) + 'px',
+            'top:' + (y - size / 2) + 'px',
+            'background:transparent',                     // 内部透明
+            'pointer-events:none',
+            'z-index:-1',                                // 在按钮图层后面
+            'animation:' + animName + ' ' + cfg.duration + 'ms ease-out forwards'
+        ].join(';');
+        keyElement.appendChild(ripple);
+        // 动画结束后移除波纹节点
+        setTimeout(function () {
+            if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
+        }, cfg.duration + 50);
+    }
+
+    // 跨标签页同步
+    window.addEventListener('storage', function (e) {
+        if (e.key === 'dialerButtonRipple') {
+            // 配置变化无需立即操作 DOM，下次按键时重新读取即可
+        }
+    });
 
 function initDialer() {
     // 初始化图片动画时间配置
@@ -1954,7 +2156,12 @@ function initDialer() {
             // 标记键为已按下
             pressedKeys[keyValue] = true;
             
-            handleKeyPress(keyValue, this);
+            // 计算触摸点相对于按钮的坐标（用于水波纹定位）
+            const tRect = this.getBoundingClientRect();
+            const touch = e.touches && e.touches[0];
+            const tx = touch ? (touch.clientX - tRect.left) : this.offsetWidth / 2;
+            const ty = touch ? (touch.clientY - tRect.top) : this.offsetHeight / 2;
+            handleKeyPress(keyValue, this, tx, ty);
         });
         
         // 对于桌面设备，仍使用mousedown和mouseup事件以提供更好的交互体验
@@ -1973,7 +2180,11 @@ function initDialer() {
             // 标记键为已按下
             pressedKeys[keyValue] = true;
             
-            handleKeyPress(keyValue, this);
+            // 计算鼠标点相对于按钮的坐标（用于水波纹定位）
+            const mRect = this.getBoundingClientRect();
+            const mx = e.clientX - mRect.left;
+            const my = e.clientY - mRect.top;
+            handleKeyPress(keyValue, this, mx, my);
         });
         
         // 鼠标松开事件
@@ -2006,6 +2217,8 @@ function initDialer() {
             }
             // 当鼠标松开时，使用默认淡出时间逐步降低当前播放音频的音量
             fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
+            // 模式7：隐藏 GIF 弹出
+            try { hideGifPopup(this); } catch (e) {}
             // 恢复按钮的默认大小尺寸（由后台「按钮触摸大小变换设置」控制）
             if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease) {
                 TouchSizeController.applyOnRelease(this, keyValue);
@@ -2034,6 +2247,8 @@ function initDialer() {
             }
             // 当鼠标离开按键时，使用默认淡出时间逐步降低当前播放音频的音量
             fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
+            // 模式7：隐藏 GIF 弹出
+            try { hideGifPopup(this); } catch (e) {}
             // 鼠标离开时恢复按钮的默认大小尺寸
             const mouseLeaveKeyValue = this.getAttribute('data-key');
             if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease && mouseLeaveKeyValue) {
@@ -2067,6 +2282,8 @@ function initDialer() {
                     img.style.opacity = '0'; // 触摸结束时恢复为透明
                 }
             }
+            // 模式7：隐藏 GIF 弹出
+            try { hideGifPopup(this); } catch (e) {}
             // 当触摸结束时，使用默认淡出时间逐步降低当前播放音频的音量
             fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
             // 触摸结束时恢复按钮的默认大小尺寸
@@ -2207,6 +2424,8 @@ function initDialer() {
             if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease && dialerKey) {
                 TouchSizeController.applyOnRelease(elementToUpdate, dialerKey);
             }
+            // 模式7：键盘松手隐藏 GIF 弹出
+            try { hideGifPopup(elementToUpdate); } catch (e) {}
         }
     });
     
@@ -2224,9 +2443,22 @@ function initDialer() {
      * @param {string} keyValue - 按键的值
      * @param {HTMLElement} keyElement - 按键元素
      */
-    function handleKeyPress(keyValue, keyElement) {
+    function handleKeyPress(keyValue, keyElement, rippleX, rippleY) {
         // 播放按键音效，传入按键值
         playKeySound(keyValue);
+
+        // 模式8：水波纹特效（若未传坐标则用按钮中心）
+        try {
+            if (rippleX === undefined || rippleY === undefined) {
+                const r = keyElement.getBoundingClientRect();
+                rippleX = keyElement.offsetWidth / 2;
+                rippleY = keyElement.offsetHeight / 2;
+            }
+            createRipple(keyElement, rippleX, rippleY);
+        } catch (e) {}
+
+        // 模式7：按下按钮弹出 GIF 动画（若已启用且已上传 GIF）
+        try { showGifPopup(keyElement); } catch (e) {}
 
         // 保存当前颜色状态
         const currentColor = numberDisplay.style.color;

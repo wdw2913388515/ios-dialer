@@ -1861,6 +1861,7 @@
                 objectFit: 'cover',   // cover=裁剪 | contain=不裁剪 | outside=按钮外完整
                 outsideFit: 'width',  // outside 模式下：'width'=宽=按钮直径 | 'height'=高=按钮直径
                 // 按钮放大阴影
+                shadowEnabled: false,        // 阴影总开关（默认关闭）
                 shadowColor: '#ff6b35',    // 阴影颜色（十六进制）
                 shadowBlur: 24,            // 阴影面积/模糊半径 px
                 shadowOpacity: 0.6,        // 阴影透明度 0~1
@@ -1908,6 +1909,9 @@
                 const elShadowFadeOut = document.getElementById('charImgShadowFadeOut');
                 if (elShadowFadeIn) elShadowFadeIn.value = p.shadowFadeIn;
                 if (elShadowFadeOut) elShadowFadeOut.value = p.shadowFadeOut;
+                // 阴影总开关回填
+                const elShadowEnabled = document.getElementById('charImgShadowEnabled');
+                if (elShadowEnabled) elShadowEnabled.checked = p.shadowEnabled !== false;
                 // outside 选项显隐 + 回填
                 const outsideRow = document.getElementById('outsideFitRow');
                 if (outsideRow) {
@@ -2004,6 +2008,15 @@
                     saveCharImgParams(p);
                 });
             });
+            // 阴影总开关：变更即自动保存
+            const shadowEnabledEl = document.getElementById('charImgShadowEnabled');
+            if (shadowEnabledEl) {
+                shadowEnabledEl.addEventListener('change', function () {
+                    const p = loadCharImgParams();
+                    p.shadowEnabled = shadowEnabledEl.checked;
+                    saveCharImgParams(p);
+                });
+            }
             // 恢复默认按钮
             const resetBtn = document.getElementById('charImgParamsReset');
             if (resetBtn) {
@@ -2110,6 +2123,192 @@
             }
             // 初始回填
             renderBtn3DUI();
+
+            // ===== 模式7：按钮 GIF 弹出效果 =====
+            const GIFPOPUP_KEY = 'dialerButtonGifPopup';
+            const GIFPOPUP_DEFAULT = {
+                enabled: false,
+                gifDataUrl: '',
+                loop: 'infinite',   // infinite=按下循环松手消失 | once=播完自动消失
+                scale: 1.5,          // GIF 相对按钮直径的缩放倍数
+                position: 'center',  // center=按钮中央 | top=按钮上方 | bottom=按钮下方
+                onceDuration: 1200   // once 模式下的显示时长 ms
+            };
+
+            /** 读取模式7配置 */
+            function loadGifPopupConfig() {
+                try {
+                    const raw = localStorage.getItem(GIFPOPUP_KEY);
+                    if (raw) return Object.assign({}, GIFPOPUP_DEFAULT, JSON.parse(raw));
+                } catch (e) {}
+                return Object.assign({}, GIFPOPUP_DEFAULT);
+            }
+            /** 保存模式7配置 */
+            function saveGifPopupConfig(cfg) {
+                try { localStorage.setItem(GIFPOPUP_KEY, JSON.stringify(cfg)); } catch (e) {}
+            }
+            /** 回填模式7 UI */
+            function renderGifPopupUI() {
+                const cfg = loadGifPopupConfig();
+                const elEn = document.getElementById('gifPopupEnabled');
+                const elLoop = document.querySelector('input[name="gifPopupLoop"]:checked');
+                const elScale = document.getElementById('gifPopupScale');
+                const elScaleVal = document.getElementById('gifPopupScaleVal');
+                const elPos = document.getElementById('gifPopupPosition');
+                const elOnce = document.getElementById('gifPopupOnceDuration');
+                const elOnceVal = document.getElementById('gifPopupOnceDurationVal');
+                const elOnceRow = document.getElementById('gifPopupOnceRow');
+                const elPreview = document.getElementById('gifPopupPreviewImg');
+                if (elEn) elEn.checked = cfg.enabled;
+                if (cfg.loop === 'once') {
+                    const r = document.querySelector('input[name="gifPopupLoop"][value="once"]');
+                    if (r) r.checked = true;
+                } else {
+                    const r = document.querySelector('input[name="gifPopupLoop"][value="infinite"]');
+                    if (r) r.checked = true;
+                }
+                if (elScale) elScale.value = cfg.scale;
+                if (elScaleVal) elScaleVal.textContent = cfg.scale + 'x';
+                if (elPos) elPos.value = cfg.position;
+                if (elOnce) elOnce.value = cfg.onceDuration;
+                if (elOnceVal) elOnceVal.textContent = cfg.onceDuration + 'ms';
+                if (elOnceRow) {
+                    elOnceRow.classList.toggle('hidden', cfg.loop !== 'once');
+                }
+                if (elPreview) {
+                    if (cfg.gifDataUrl) {
+                        elPreview.src = cfg.gifDataUrl;
+                        elPreview.style.display = 'block';
+                    } else {
+                        elPreview.removeAttribute('src');
+                        elPreview.style.display = 'none';
+                    }
+                }
+            }
+            // 开关
+            const gifEnEl = document.getElementById('gifPopupEnabled');
+            if (gifEnEl) gifEnEl.addEventListener('change', function () {
+                const cfg = loadGifPopupConfig();
+                cfg.enabled = gifEnEl.checked;
+                saveGifPopupConfig(cfg); renderGifPopupUI();
+                showNotification(cfg.enabled ? '模式7已开启并自动保存' : '模式7已关闭并自动保存');
+            });
+            // GIF 上传（转 base64 存 localStorage）
+            const gifUploadEl = document.getElementById('gifPopupUpload');
+            if (gifUploadEl) gifUploadEl.addEventListener('change', function (e) {
+                const file = e.target.files && e.target.files[0];
+                if (!file) return;
+                if (!/gif$/i.test(file.name) && file.type !== 'image/gif') {
+                    showNotification('请上传 GIF 格式图片'); return;
+                }
+                const reader = new FileReader();
+                reader.onload = function () {
+                    const cfg = loadGifPopupConfig();
+                    cfg.gifDataUrl = reader.result;
+                    saveGifPopupConfig(cfg); renderGifPopupUI();
+                    showNotification('GIF 已上传并保存');
+                };
+                reader.readAsDataURL(file);
+            });
+            // 循环模式
+            document.querySelectorAll('input[name="gifPopupLoop"]').forEach(function (r) {
+                r.addEventListener('change', function () {
+                    const cfg = loadGifPopupConfig();
+                    cfg.loop = r.value;
+                    saveGifPopupConfig(cfg); renderGifPopupUI();
+                });
+            });
+            // 缩放
+            const gifScaleEl = document.getElementById('gifPopupScale');
+            if (gifScaleEl) gifScaleEl.addEventListener('input', function () {
+                const cfg = loadGifPopupConfig();
+                cfg.scale = parseFloat(gifScaleEl.value) || 1.5;
+                saveGifPopupConfig(cfg); renderGifPopupUI();
+            });
+            // 位置
+            const gifPosEl = document.getElementById('gifPopupPosition');
+            if (gifPosEl) gifPosEl.addEventListener('change', function () {
+                const cfg = loadGifPopupConfig();
+                cfg.position = gifPosEl.value;
+                saveGifPopupConfig(cfg); renderGifPopupUI();
+            });
+            // 单次时长
+            const gifOnceEl = document.getElementById('gifPopupOnceDuration');
+            if (gifOnceEl) gifOnceEl.addEventListener('input', function () {
+                const cfg = loadGifPopupConfig();
+                cfg.onceDuration = parseInt(gifOnceEl.value) || 1200;
+                saveGifPopupConfig(cfg); renderGifPopupUI();
+            });
+            // 删除 GIF
+            const gifClearEl = document.getElementById('gifPopupClear');
+            if (gifClearEl) gifClearEl.addEventListener('click', function () {
+                const cfg = loadGifPopupConfig();
+                cfg.gifDataUrl = '';
+                saveGifPopupConfig(cfg); renderGifPopupUI();
+                showNotification('已清除 GIF');
+            });
+            // 初始回填
+            renderGifPopupUI();
+
+            // ===== 模式8：按钮水波纹特效 =====
+            const RIPPLE_KEY = 'dialerButtonRipple';
+            const RIPPLE_DEFAULT = {
+                enabled: false,
+                color: 'rgba(255,255,255,0.5)',  // 波纹颜色（推荐半透明白）
+                duration: 600,                    // 波纹扩散时长 ms
+                maxScale: 4                        // 波纹最大缩放倍数
+            };
+            function loadRippleConfig() {
+                try {
+                    const raw = localStorage.getItem(RIPPLE_KEY);
+                    if (raw) return Object.assign({}, RIPPLE_DEFAULT, JSON.parse(raw));
+                } catch (e) {}
+                return Object.assign({}, RIPPLE_DEFAULT);
+            }
+            function saveRippleConfig(cfg) {
+                try { localStorage.setItem(RIPPLE_KEY, JSON.stringify(cfg)); } catch (e) {}
+            }
+            function renderRippleUI() {
+                const cfg = loadRippleConfig();
+                const elEn = document.getElementById('rippleEnabled');
+                const elColor = document.getElementById('rippleColor');
+                const elDur = document.getElementById('rippleDuration');
+                const elDurVal = document.getElementById('rippleDurationVal');
+                const elScale = document.getElementById('rippleMaxScale');
+                const elScaleVal = document.getElementById('rippleMaxScaleVal');
+                if (elEn) elEn.checked = cfg.enabled;
+                if (elColor) elColor.value = cfg.color;
+                if (elDur) elDur.value = cfg.duration;
+                if (elDurVal) elDurVal.textContent = cfg.duration + 'ms';
+                if (elScale) elScale.value = cfg.maxScale;
+                if (elScaleVal) elScaleVal.textContent = cfg.maxScale + 'x';
+            }
+            const ripEnEl = document.getElementById('rippleEnabled');
+            if (ripEnEl) ripEnEl.addEventListener('change', function () {
+                const cfg = loadRippleConfig();
+                cfg.enabled = ripEnEl.checked;
+                saveRippleConfig(cfg); renderRippleUI();
+                showNotification(cfg.enabled ? '模式8已开启并自动保存' : '模式8已关闭并自动保存');
+            });
+            const ripColorEl = document.getElementById('rippleColor');
+            if (ripColorEl) ripColorEl.addEventListener('input', function () {
+                const cfg = loadRippleConfig();
+                cfg.color = ripColorEl.value;
+                saveRippleConfig(cfg);
+            });
+            const ripDurEl = document.getElementById('rippleDuration');
+            if (ripDurEl) ripDurEl.addEventListener('input', function () {
+                const cfg = loadRippleConfig();
+                cfg.duration = parseInt(ripDurEl.value) || 600;
+                saveRippleConfig(cfg); renderRippleUI();
+            });
+            const ripScaleEl = document.getElementById('rippleMaxScale');
+            if (ripScaleEl) ripScaleEl.addEventListener('input', function () {
+                const cfg = loadRippleConfig();
+                cfg.maxScale = parseFloat(ripScaleEl.value) || 4;
+                saveRippleConfig(cfg); renderRippleUI();
+            });
+            renderRippleUI();
 
             /**
              * 更新已勾选文字展示区域
@@ -5516,7 +5715,10 @@
                 </div>
                 <!-- 按钮放大阴影参数 -->
                 <div class="mt-2 pt-2 border-t border-pink-200 flex flex-wrap gap-4 items-center">
-                    <span class="text-[11px] text-pink-600 font-medium">💡 按钮放大阴影</span>
+                    <label class="flex items-center gap-1.5 cursor-pointer">
+                        <input type="checkbox" id="charImgShadowEnabled" class="w-4 h-4 accent-pink-500">
+                        <span class="text-[11px] text-pink-600 font-medium">阴影显示与关闭（默认关闭）</span>
+                    </label>
                     <label class="flex items-center gap-2 text-xs text-gray-600">
                         <span>颜色</span>
                         <input id="charImgShadowColor" type="color" value="#ff6b35"
@@ -6714,4 +6916,90 @@
             setupHideLetters();
         }
     </script>
+
+    <!-- ==================== 模式7：按钮 GIF 弹出效果（页面最底部） ==================== -->
+    <div class="border-l-2 border-rose-100 pl-4 mb-6">
+        <h3 class="text-base font-semibold mb-3">模式7：按钮 GIF 弹出效果</h3>
+        <p class="text-xs text-gray-500 mb-3">独立开关（默认关闭）。按下任意拨号按钮时，在按钮位置弹出上传的 GIF 动画；可选择循环播放（松手消失）或单次播放（播完自动消失）。</p>
+        <div class="flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="gifPopupEnabled" class="w-4 h-4 accent-rose-500">
+                <span class="text-sm text-gray-700">启用 GIF 弹出效果</span>
+            </label>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center gap-3">
+            <label class="inline-flex items-center px-3 py-1.5 bg-rose-500 text-white text-sm rounded-lg cursor-pointer hover:bg-rose-600 transition">
+                📷 上传 GIF
+                <input type="file" id="gifPopupUpload" accept="image/gif" class="hidden">
+            </label>
+            <button id="gifPopupClear" type="button" class="px-3 py-1.5 bg-gray-200 text-gray-700 text-sm rounded-lg hover:bg-gray-300 transition">清除 GIF</button>
+            <img id="gifPopupPreviewImg" class="w-12 h-12 object-contain border border-gray-200 rounded-lg bg-white hidden" alt="预览">
+            <span class="text-xs text-gray-400">建议使用透明背景 GIF，尺寸适中</span>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center gap-4">
+            <span class="text-sm text-gray-700">播放方式：</span>
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm text-gray-700">
+                <input type="radio" name="gifPopupLoop" value="infinite" class="accent-rose-500">
+                <span>循环播放（松手消失）</span>
+            </label>
+            <label class="flex items-center gap-1.5 cursor-pointer text-sm text-gray-700">
+                <input type="radio" name="gifPopupLoop" value="once" class="accent-rose-500">
+                <span>单次播放（播完消失）</span>
+            </label>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+                <span>GIF 缩放</span>
+                <input id="gifPopupScale" type="range" min="0.5" max="5" step="0.1" value="1.5" class="w-28 accent-rose-500">
+                <span id="gifPopupScaleVal" class="text-xs text-gray-500 font-mono w-10">1.5x</span>
+            </label>
+            <label class="flex items-center gap-2 text-sm text-gray-700">
+                <span>弹出位置</span>
+                <select id="gifPopupPosition" class="px-3 py-1.5 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-rose-500">
+                    <option value="center">按钮中央</option>
+                    <option value="top">按钮上方</option>
+                    <option value="bottom">按钮下方</option>
+                </select>
+            </label>
+        </div>
+        <div id="gifPopupOnceRow" class="hidden mt-3 flex items-center gap-2">
+            <span class="text-sm text-gray-700">单次显示时长</span>
+            <input id="gifPopupOnceDuration" type="range" min="300" max="5000" step="100" value="1200" class="w-32 accent-rose-500">
+            <span id="gifPopupOnceDurationVal" class="text-xs text-gray-500 font-mono w-14">1200ms</span>
+            <span class="text-xs text-gray-400">松手后经过该时长自动消失（按住时 GIF 一直完整显示）</span>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">配置保存后拨号页实时同步；GIF 以 base64 存储在本地，更换设备需重新上传</p>
+    </div>
+
+    <!-- ==================== 模式8：按钮水波纹特效（页面底部，紧跟模式7） ==================== -->
+    <div class="border-l-2 border-cyan-100 pl-4 mb-6">
+        <h3 class="text-base font-semibold mb-3">模式8：按钮水波纹特效</h3>
+        <p class="text-xs text-gray-500 mb-3">独立开关（默认关闭）。按下拨号按钮时，从点击位置向四周扩散半透明圆形波纹，模拟 Material Design 水波纹质感。</p>
+        <div class="flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 cursor-pointer">
+                <input type="checkbox" id="rippleEnabled" class="w-4 h-4 accent-cyan-500">
+                <span class="text-sm text-gray-700">启用水波纹特效</span>
+            </label>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 text-xs text-gray-600">
+                <span>波纹颜色</span>
+                <input id="rippleColor" type="color" value="#ffffff" class="w-8 h-6 rounded border border-cyan-300 cursor-pointer bg-white">
+            </label>
+            <span class="text-[10px] text-gray-400">建议用白色/浅色 + 半透明效果最佳</span>
+        </div>
+        <div class="mt-3 flex flex-wrap items-center gap-4">
+            <label class="flex items-center gap-2 text-xs text-gray-600">
+                <span>扩散时长</span>
+                <input id="rippleDuration" type="range" min="200" max="1500" step="50" value="600" class="w-28 accent-cyan-500">
+                <span id="rippleDurationVal" class="text-[10px] text-gray-500 font-mono w-12">600ms</span>
+            </label>
+            <label class="flex items-center gap-2 text-xs text-gray-600">
+                <span>最大扩散</span>
+                <input id="rippleMaxScale" type="range" min="1" max="10" step="0.5" value="4" class="w-28 accent-cyan-500">
+                <span id="rippleMaxScaleVal" class="text-[10px] text-gray-500 font-mono w-10">4x</span>
+            </label>
+        </div>
+        <p class="text-xs text-gray-400 mt-2">波纹从点击位置扩散，长按重复点击会叠加多个波纹</p>
+    </div>
 </html>
