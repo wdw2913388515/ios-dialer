@@ -1615,17 +1615,30 @@ function initDialer() {
     
     /**
      * 规范化按键值为 data-key 命名空间
-     * 键盘事件中 i→*、o→0、p→#，数字键保持原样
-     * 确保键盘/鼠标/触摸三种输入方式共享同一份 pressedKeys
+     * 根据后台配置的键盘映射方案进行转换：
+     *   方案A（iop）：i→*, o→0, p→#（默认）
+     *   方案B（qwerty）：q→4, w→5, e→6, a→7, s→8, d→9, z→*, x→0, c→#
+     * 数字键在两种方案下都保持原样
      * @param {string} rawKey - 原始按键值（可能来自键盘事件 e.key 或按钮 data-key）
      * @returns {string} 规范化后的 data-key 值
      */
     function normalizeKeyValue(rawKey) {
         if (typeof rawKey !== 'string') return '';
         const lower = rawKey.toLowerCase();
-        if (lower === 'i') return '*';
-        if (lower === 'o') return '0';
-        if (lower === 'p') return '#';
+        // 读取后台配置的键盘映射方案（默认 iop）
+        let layout = 'iop';
+        try { layout = localStorage.getItem('dialerKeyboardLayout') || 'iop'; } catch (e) {}
+
+        if (layout === 'qwerty') {
+            // 方案B：123 + qwe + asd + zxc
+            const qwertyMap = { 'q': '4', 'w': '5', 'e': '6', 'a': '7', 's': '8', 'd': '9', 'z': '*', 'x': '0', 'c': '#' };
+            if (qwertyMap[lower]) return qwertyMap[lower];
+        } else {
+            // 方案A（默认）：数字行 + iop
+            if (lower === 'i') return '*';
+            if (lower === 'o') return '0';
+            if (lower === 'p') return '#';
+        }
         return rawKey;
     }
 

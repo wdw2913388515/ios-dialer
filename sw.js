@@ -4,7 +4,7 @@
  * @version 1.0.0
  */
 
-const CACHE_VERSION = 'ios-dialer-v1.0.0';
+const CACHE_VERSION = 'ios-dialer-v1.1.0';
 const PRECACHE_URLS = [
     '/',
     '/index.html',
