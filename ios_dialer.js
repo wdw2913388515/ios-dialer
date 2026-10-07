@@ -113,7 +113,8 @@ const TouchSizeController = (function () {
         lastAutoTriggeredIdx: -1, // 自动模式：上次已触发放大的合并序列索引（用于去重）
         lockedEl: null,         // 当前锁定的按钮元素（松手不恢复）
         lockedKeyValue: null,   // 锁定按钮的键值
-        wasLastStep: false      // 本次按下是否是最后一步（松手要恢复）
+        wasLastStep: false,     // 本次按下是否是最后一步（松手要恢复）
+        pressingEl: null        // 当前仍被按住的按钮元素（自动模式 50ms 延迟竞态检查用）
     };
 
     /**
@@ -509,8 +510,11 @@ const TouchSizeController = (function () {
                     // ⚠️ 关键：自动打字在 applyOnPress 的后半段才执行（displayedLen++）
                     // 所以这里必须延迟一帧再检查 displayedLen，否则永远少 1！
                     const bindMode = false; // 已在外面判断是自动模式
+                    charSelectState.pressingEl = keyElement;
                     setTimeout(() => {
                         try {
+                            // 松手先于本延迟到达（快速点按）→ 放弃本次放大，防止按钮卡在放大状态无法弹起
+                            if (charSelectState.pressingEl !== keyElement) return;
                             // 重新从 localStorage 读一次（确保数据最新）
                             const groupsRaw2 = localStorage.getItem('dialerCharGroups');
                             if (!groupsRaw2) return;
@@ -657,6 +661,8 @@ const TouchSizeController = (function () {
                 applyTransform(el, 1, releaseDur);
             });
         } else if (mode === 'charSelect') {
+            // 标记已松手：让自动模式 50ms 延迟回调感知松手，放弃延迟放大（防卡死）
+            charSelectState.pressingEl = null;
             // 模式5（字符勾选）松手：
             // - 最后一步触发的按钮 → 恢复默认 + 图片跟随缩小 + 同时淡出（三者同步并行）
             // - 非最后一步（已锁定）→ 保持当前大小不变
@@ -1223,7 +1229,6 @@ function applyDefaultColors() {
                 background: radial-gradient(circle at 35% 30%, #fefefe, #dcdce1 45%, #a8a8b0 78%, #8b8b93) !important;
                 box-shadow: 0 8px 16px rgba(0,0,0,.22), inset 0 -6px 12px rgba(0,0,0,.14), inset 0 5px 10px rgba(255,255,255,.85) !important;
             }
-            [data-key].btn3d-sphere:active,
             [data-key].btn3d-sphere.btn3d-pressed {
                 background: radial-gradient(circle at 35% 30%, #d4d4d9, #bcbcc3 50%, #98989f 80%) !important;
                 box-shadow: inset 0 5px 12px rgba(0,0,0,.28), 0 2px 5px rgba(0,0,0,.12) !important;
@@ -1232,7 +1237,6 @@ function applyDefaultColors() {
                 background: #e6e7eb !important;
                 box-shadow: 7px 7px 14px #c3c4c8, -7px -7px 14px #ffffff !important;
             }
-            [data-key].btn3d-neumorph:active,
             [data-key].btn3d-neumorph.btn3d-pressed {
                 box-shadow: inset 5px 5px 10px #c3c4c8, inset -5px -5px 10px #ffffff !important;
             }
@@ -1243,7 +1247,6 @@ function applyDefaultColors() {
                 backdrop-filter: blur(8px);
                 -webkit-backdrop-filter: blur(8px);
             }
-            [data-key].btn3d-glass:active,
             [data-key].btn3d-glass.btn3d-pressed {
                 background: linear-gradient(135deg, rgba(255,255,255,.45), rgba(255,255,255,.12)) !important;
                 box-shadow: inset 0 4px 10px rgba(31,38,135,.15), 0 4px 12px rgba(31,38,135,.10) !important;
@@ -1253,7 +1256,6 @@ function applyDefaultColors() {
                 box-shadow: 0 11px 0 #0f5a9e, 0 14px 20px rgba(15,90,158,.35) !important;
                 transition: transform .12s ease, box-shadow .12s ease !important;
             }
-            [data-key].btn3d-candy:active,
             [data-key].btn3d-candy.btn3d-pressed {
                 transform: translateY(7px) !important;
                 box-shadow: 0 4px 0 #0f5a9e, 0 6px 10px rgba(15,90,158,.30) !important;
@@ -1271,14 +1273,12 @@ function applyDefaultColors() {
                 border-radius: 14px !important;
                 transition: transform .12s ease, box-shadow .12s ease, background-color .12s ease, color .12s ease !important;
             }
-            [data-key].btn3d-keyboard:active,
             [data-key].btn3d-keyboard.btn3d-pressed {
                 transform: translateY(var(--kb-depth, 3px)) !important;
                 background: var(--kb-press-bg, #e0e2e6) !important;
                 /* 底座保留一部分厚边 + 内阴影模拟键帽陷入底座 */
                 box-shadow: 0 3px 0 #3a3f4a, inset 0 3px 6px rgba(0,0,0,.22), 0 5px 8px rgba(0,0,0,.16) !important;
             }
-            [data-key].btn3d-keyboard:active, [data-key].btn3d-keyboard:active *,
             [data-key].btn3d-keyboard.btn3d-pressed, [data-key].btn3d-keyboard.btn3d-pressed * {
                 color: var(--kb-press-text, #1a1d24) !important;
             }
@@ -1450,7 +1450,29 @@ function applyDefaultColors() {
     }
 
     /**
-     * 在按钮指定位置生成水波纹扩散动画
+     * 注入水波纹 @keyframes 动画样式（幂等，只注入一次）
+     * 动画曲线：scale(1)→scale(maxScale) 持续放大；opacity 0→1→0 先淡入再淡出
+     */
+    function ensureRippleStyleTag() {
+        if (document.getElementById('dialerRippleStyleTag')) return;
+        const style = document.createElement('style');
+        style.id = 'dialerRippleStyleTag';
+        style.textContent = `
+            @keyframes dialerRippleAnim {
+                0%   { transform: scale(1); opacity: 0; }
+                35%  { opacity: 1; }
+                100% { transform: scale(var(--ripple-max, 4)); opacity: 0; }
+            }
+            .dialer-ripple {
+                animation: dialerRippleAnim var(--ripple-dur, 600ms) ease-out forwards;
+            }
+        `;
+        document.head.appendChild(style);
+    }
+
+    /**
+     * 在按钮指定位置生成水波纹扩散动画（空心白环）
+     * 效果：从按钮尺寸开始放大到设置的最大尺寸，透明度 0→1→0，内部透明边缘渐白
      * @param {HTMLElement} keyElement - 被按下的按钮
      * @param {number} x - 相对于按钮的点击 x 坐标
      * @param {number} y - 相对于按钮的点击 y 坐标
@@ -1458,49 +1480,33 @@ function applyDefaultColors() {
     function createRipple(keyElement, x, y) {
         const cfg = getRippleConfig();
         if (!cfg.enabled || !keyElement) return;
-        console.log('[模式8·水波纹] 触发', cfg);
-        // 按钮直径作为波纹起始尺寸
-        const size = Math.max(keyElement.offsetWidth, keyElement.offsetHeight);
-        // 计算按钮中心在视口中的坐标（fixed 定位用视口坐标）
+        ensureRippleStyleTag();
+        // 获取按钮在视口中的位置和尺寸
         const rect = keyElement.getBoundingClientRect();
-        const cx = rect.left + x;  // x 是相对于按钮的坐标
-        const cy = rect.top + y;
-        // 颜色转半透明
-        let rippleColor = cfg.color;
-        if (/^#/.test(rippleColor)) {
-            rippleColor = hexToRgba(rippleColor, 0.5);
-        }
-        // 注入 keyframes
-        const animName = 'dialerRippleAnim_' + cfg.duration + '_' + cfg.maxScale;
-        let styleTag = document.getElementById('dialerRippleKeyframes');
-        if (!styleTag) {
-            styleTag = document.createElement('style');
-            styleTag.id = 'dialerRippleKeyframes';
-            document.head.appendChild(styleTag);
-        }
-        if (!styleTag.textContent.includes('@keyframes ' + animName + ' ')) {
-            styleTag.textContent += `\n@keyframes ${animName} {
-                0%   { transform: translate(-50%,-50%) scale(1); opacity: 0; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
-                30%  { transform: translate(-50%,-50%) scale(${1 + (cfg.maxScale - 1) * 0.3}); opacity: 1; box-shadow: 0 0 0 ${size * 0.18}px ${rippleColor}; }
-                100% { transform: translate(-50%,-50%) scale(${cfg.maxScale}); opacity: 0; box-shadow: 0 0 0 0px ${rippleColor}; }
-            }\n`;
-        }
+        const btnSize = Math.max(rect.width, rect.height);
+        const centerX = rect.left + rect.width / 2;
+        const centerY = rect.top + rect.height / 2;
+        const size = btnSize;
+        // 把用户颜色转成带透明度的 rgba，用于空心环边缘
+        const ringColor = (typeof hexToRgba === 'function') ? hexToRgba(cfg.color, 0.6) : cfg.color;
         const ripple = document.createElement('span');
         ripple.className = 'dialer-ripple';
-        // position:fixed 挂到 body，left/top 为视口坐标，用 translate(-50%,-50%) 居中到点击点
         ripple.style.cssText = [
             'position:fixed',
-            'left:' + cx + 'px',
-            'top:' + cy + 'px',
+            'border-radius:50%',
             'width:' + size + 'px',
             'height:' + size + 'px',
-            'border-radius:50%',
-            'background:transparent',
+            'left:' + (centerX - size / 2) + 'px',
+            'top:' + (centerY - size / 2) + 'px',
+            // 空心环：中心透明 → 边缘颜色渐变 → 外缘透明
+            'background:radial-gradient(circle, transparent 42%, ' + ringColor + ' 62%, transparent 82%)',
             'pointer-events:none',
-            'z-index:9999',
-            'animation:' + animName + ' ' + cfg.duration + 'ms ease-out forwards'
+            'z-index:99997',
+            '--ripple-max:' + cfg.maxScale,
+            '--ripple-dur:' + cfg.duration + 'ms'
         ].join(';');
         document.body.appendChild(ripple);
+        // 动画结束后移除波纹节点
         setTimeout(function () {
             if (ripple.parentNode) ripple.parentNode.removeChild(ripple);
         }, cfg.duration + 50);
@@ -2190,6 +2196,8 @@ function initDialer() {
             }
 
             this.classList.remove('key-pressed');
+            // 模式6：松手移除 3D 按压效果，确保按钮自动弹起
+            this.classList.remove('btn3d-pressed');
             // 恢复按钮的默认背景颜色
             this.style.backgroundColor = keyNormalColor;
             // 恢复数字的默认颜色
@@ -2222,6 +2230,8 @@ function initDialer() {
         // 鼠标离开事件
         key.addEventListener('mouseleave', function() {
             this.classList.remove('key-pressed');
+            // 模式6：鼠标离开也移除 3D 按压效果，防止卡在下沉状态
+            this.classList.remove('btn3d-pressed');
             // 恢复按钮的默认背景颜色
             this.style.backgroundColor = keyNormalColor;
             // 恢复数字的默认颜色
@@ -2259,6 +2269,8 @@ function initDialer() {
             }
 
             this.classList.remove('key-pressed');
+            // 模式6：触摸结束移除 3D 按压效果，确保按钮自动弹起
+            this.classList.remove('btn3d-pressed');
             // 恢复按钮的默认背景颜色
             this.style.backgroundColor = keyNormalColor;
             // 恢复数字的默认颜色
@@ -2288,15 +2300,21 @@ function initDialer() {
         
         // 触摸取消事件
         key.addEventListener('touchcancel', function() {
+            const cancelKeyValue = this.getAttribute('data-key');
+            if (cancelKeyValue) {
+                delete pressedKeys[cancelKeyValue];
+            }
             this.classList.remove('key-pressed');
+            // 模式6：触摸取消也要移除 3D 按压效果，确保按钮自动弹起
+            this.classList.remove('btn3d-pressed');
             // 恢复按钮的默认背景颜色
-            this.style.backgroundColor = '';
+            this.style.backgroundColor = keyNormalColor;
             // 恢复数字的默认颜色
-            this.style.color = '';
+            this.style.color = numberNormalColor;
             // 恢复字母的默认颜色
             const labelElement = this.querySelector('.ios-key-label');
             if (labelElement) {
-                labelElement.style.color = '';
+                labelElement.style.color = letterNormalColor;
             }
             // 隐藏按钮图片（将透明度设置回0）
             const imgContainer = this.querySelector('.key-image-container');
@@ -2308,6 +2326,12 @@ function initDialer() {
             }
             // 当触摸取消时，使用默认淡出时间逐步降低当前播放音频的音量
             fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
+            // 触摸取消时恢复按钮默认大小尺寸
+            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease) {
+                TouchSizeController.applyOnRelease(this, cancelKeyValue);
+            }
+            // 模式7：触摸取消也要隐藏 GIF 弹出
+            try { hideGifPopup(this); } catch (e) {}
         });
     });
     
@@ -2440,6 +2464,9 @@ function initDialer() {
     function handleKeyPress(keyValue, keyElement, rippleX, rippleY) {
         // 播放按键音效，传入按键值
         playKeySound(keyValue);
+
+        // 模式6：鼠标/触摸按下同步 3D 按压效果（松手由 mouseup/touchend/touchcancel/keyup 统一移除）
+        if (keyElement) keyElement.classList.add('btn3d-pressed');
 
         // 模式8：水波纹特效（若未传坐标则用按钮中心）
         try {
