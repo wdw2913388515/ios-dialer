@@ -218,6 +218,27 @@
             </div>
         </div>
     </div>
+    <script>
+        // 注册 Service Worker 实现离线缓存
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').then((reg) => {
+                    console.log('[SW] ✅ 已注册:', reg.scope);
+                    // 检测新版本并自动激活
+                    reg.addEventListener('updatefound', () => {
+                        const newSW = reg.installing;
+                        newSW.addEventListener('statechange', () => {
+                            if (newSW.state === 'installed' && navigator.serviceWorker.controller) {
+                                newSW.postMessage('SKIP_WAITING');
+                            }
+                        });
+                    });
+                }).catch((err) => {
+                    console.warn('[SW] ❌ 注册失败:', err);
+                });
+            });
+        }
+    </script>
 </body>
 </html>
 

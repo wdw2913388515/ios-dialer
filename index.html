@@ -31,5 +31,15 @@
         <p>正在跳转到拨号键盘...</p>
         <p><a href="ios_dialer.html">如果没有自动跳转，点这里</a></p>
     </div>
+    <script>
+        // 注册 Service Worker 实现离线缓存
+        if ('serviceWorker' in navigator) {
+            window.addEventListener('load', () => {
+                navigator.serviceWorker.register('./sw.js').catch((err) => {
+                    console.warn('[SW] 注册失败:', err);
+                });
+            });
+        }
+    </script>
 </body>
 </html>
