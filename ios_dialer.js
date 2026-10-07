@@ -113,8 +113,7 @@ const TouchSizeController = (function () {
         lastAutoTriggeredIdx: -1, // 自动模式：上次已触发放大的合并序列索引（用于去重）
         lockedEl: null,         // 当前锁定的按钮元素（松手不恢复）
         lockedKeyValue: null,   // 锁定按钮的键值
-        wasLastStep: false,     // 本次按下是否是最后一步（松手要恢复）
-        pressingEl: null        // 当前仍被按住的按钮元素（自动模式 50ms 延迟竞态检查用）
+        wasLastStep: false      // 本次按下是否是最后一步（松手要恢复）
     };
 
     /**
@@ -165,14 +164,44 @@ const TouchSizeController = (function () {
     }
 
     /**
+     * 清理所有按钮上残留的视觉状态
+     * 包括：缩放 transform、阴影 box-shadow、outside 图片 overlay
+     * 用于 reload() 时确保新模式从干净状态开始
+     */
+    function clearAllButtonVisuals() {
+        const allKeys = getAllKeyElements();
+        allKeys.forEach(el => {
+            // 重置缩放
+            el.style.transform = '';
+            el.style.transformOrigin = '';
+            el.style.zIndex = '';
+            // 重置阴影（由模式5/模式8添加的）
+            try { removeBtnShadow(el); } catch (e) {}
+            // 重置 outside 图片 overlay
+            try { removeCharOverlay(el); } catch (e) {}
+        });
+    }
+
+    /**
      * 重新加载配置（供 storage 事件触发时调用）
+     * 完整清理：连续触摸状态、模式5所有状态、DOM 视觉残留
      */
     function reload() {
         config = loadConfig();
-        // 重置连续触摸状态
+        // 重置连续触摸状态（模式2）
         for (const k in continuousState) delete continuousState[k];
-        // 重置模式5状态
+        // 重置模式5全局递增计数器
         mode5PressCount = 0;
+        // 重置模式5字符勾选完整状态机（之前遗漏！会导致旧锁定按钮残留）
+        charSelectState = {
+            progress: {},
+            lastAutoTriggeredIdx: -1,
+            lockedEl: null,
+            lockedKeyValue: null,
+            wasLastStep: false
+        };
+        // 清理所有按钮上残留的视觉状态（缩放/阴影/overlay）
+        clearAllButtonVisuals();
     }
 
     /**
@@ -318,8 +347,11 @@ const TouchSizeController = (function () {
         }
         // 取本次对应的尺寸变化（索引从0开始）
         const idx = state.count - 1;
-        const sizes = Array.isArray(btnCfg.sizes) ? btnCfg.sizes : [];
-        const deltaPercent = idx < sizes.length ? sizes[idx] : 0;
+        const sizes = Array.isArray(btnCfg.sizes) && btnCfg.sizes.length > 0 ? btnCfg.sizes : [0];
+        // 边界处理：当 idx 超出 sizes 长度时，循环使用最后一个值
+        // （用户配置 count=5 但 sizes 只有3个元素时，第4/5次继续用最后一个尺寸）
+        const safeIdx = Math.min(idx, sizes.length - 1);
+        const deltaPercent = sizes[safeIdx];
         // 转换为缩放比例：100% + delta% （例：delta=10 → 1.10）
         return 1 + (deltaPercent / 100);
     }
@@ -458,11 +490,13 @@ const TouchSizeController = (function () {
                     groups = groups.filter(g => g.chars && g.chars.length > 0 && g.buttonKey);
                     if (!groups.length) return;
 
-                    // 切换按钮时恢复之前锁定的按钮
+                    // 切换按钮时兜底恢复之前按钮的视觉（防止用户在 A 的过渡动画期间按下 B）
                     if (charSelectState.lockedEl && charSelectState.lockedEl !== keyElement) {
-                        applyTransform(charSelectState.lockedEl, 1, 100);
-                        removeBtnShadow(charSelectState.lockedEl);  // 🔑 清旧阴影
-                        removeCharOverlay(charSelectState.lockedEl); // 🔑 清旧图片
+                        try {
+                            applyTransform(charSelectState.lockedEl, 1, 50);
+                            removeBtnShadow(charSelectState.lockedEl);
+                            removeCharOverlay(charSelectState.lockedEl);
+                        } catch (e) {}
                         charSelectState.lockedEl = null;
                         charSelectState.lockedKeyValue = null;
                     }
@@ -491,97 +525,96 @@ const TouchSizeController = (function () {
 
                     if (scale > 1.0) {
                         applyTransform(keyElement, scale, params.btnDur || 180);
-                        applyBtnShadow(keyElement, !!char.image);  // 🔑 加阴影（无图也加！）
+                        applyBtnShadow(keyElement, !!char.image);
                     } else if (char.image) {
                         applyBtnShadow(keyElement, true);  // scale=1 但有图也加阴影
                     }
 
+                    // 推进进度（所有步骤都在松手后由 applyOnRelease 统一还原，不再需要锁定中间步骤）
                     if (isLast) {
                         charSelectState.progress[group.name] = 0;
-                        charSelectState.lockedEl = null;
                     } else {
                         charSelectState.progress[group.name] = progress + 1;
+                    }
+                    // 锁定状态只在"按下期间"存在，松手时 applyOnRelease 会清理
+                    charSelectState.lockedEl = keyElement;
+                    charSelectState.lockedKeyValue = keyValue;
+                } else {
+                    // ====== 自动模式（bindMode=off） ======
+                    // 🔑 注意：之前用 setTimeout(50ms) 延迟是为了等 displayedLen++ 先执行，
+                    // 但现在 handleKeyPress 里 displayedLen++ 在 applyOnPress 之前就同步执行了（L2466→L2474），
+                    // 所以这里可以直接同步执行，彻底消除"时序反转"bug：
+                    //   旧时序（错误）：applyOnRelease 先清理 → 50ms 后自动模式放大回来 → 无人清理
+                    //   新时序（正确）：applyOnPress 同步放大 → 用户松手 → applyOnRelease 同步清理 ✅
+                    try {
+                        const groupsRaw2 = localStorage.getItem('dialerCharGroups');
+                        if (!groupsRaw2) return;
+                        let groups2 = JSON.parse(groupsRaw2);
+                        groups2 = groups2.filter(g => g.chars && g.chars.length > 0);
+                        if (!groups2.length) return;
+
+                        const seq = buildMergedSequence(groups2);
+                        if (seq.length === 0) return;
+
+                        // displayedLen 在 handleKeyPress L2466 已经同步递增，这里直接取最新值
+                        const displayedLen2 = typeof window.extraTextBlocksDisplayedLength === 'number'
+                            ? window.extraTextBlocksDisplayedLength : 0;
+
+                        console.log('[charSelect·自动] 同步检查 displayedLen=' + displayedLen2
+                            + ' 已触发=' + charSelectState.lastAutoTriggeredIdx
+                            + ' seqLen=' + seq.length);
+
+                        if (displayedLen2 <= 0) {
+                            // 打字模式未开启或已打完所有字 → 自动模式无匹配
+                            if (!(window.dialerDataManager && window.dialerDataManager.getExtraTextBlocksTypingMode && window.dialerDataManager.getExtraTextBlocksTypingMode())) {
+                                console.warn('[charSelect·自动] ⚠️ 文本块逐个显示模式未开启，自动模式无法工作。请在后台管理面板开启"文本块逐个显示"。');
+                            }
+                            return;
+                        }
+
+                        // 从后往前找 absoluteIndex < displayedLen2 的最后一个
+                        let match = null;
+                        for (let i = seq.length - 1; i >= 0; i--) {
+                            const idx = seq[i].absoluteIndex;
+                            if (idx != null && idx < displayedLen2) {
+                                match = seq[i];
+                                break;
+                            }
+                        }
+
+                        if (!match) {
+                            console.log('[charSelect·自动] ⏭️ 合并序列最小 idx=' + seq[0].absoluteIndex + ' > displayedLen=' + displayedLen2);
+                            return;
+                        }
+
+                        // 防止重复触发（同一个字只高亮一次）
+                        if (match.absoluteIndex === charSelectState.lastAutoTriggeredIdx) {
+                            return;
+                        }
+
+                        const params = getCharImgParams();
+                        const scale = match.scale || 1.0;
+                        const btnDur = params.btnDur;
+                        charSelectState.wasLastStep = true;
+                        charSelectState.lastAutoTriggeredIdx = match.absoluteIndex;
                         charSelectState.lockedEl = keyElement;
                         charSelectState.lockedKeyValue = keyValue;
-                    }
 
-                } else {
-                    // ====== 自动模式 ======
-                    // ⚠️ 关键：自动打字在 applyOnPress 的后半段才执行（displayedLen++）
-                    // 所以这里必须延迟一帧再检查 displayedLen，否则永远少 1！
-                    const bindMode = false; // 已在外面判断是自动模式
-                    charSelectState.pressingEl = keyElement;
-                    setTimeout(() => {
-                        try {
-                            // 松手先于本延迟到达（快速点按）→ 放弃本次放大，防止按钮卡在放大状态无法弹起
-                            if (charSelectState.pressingEl !== keyElement) return;
-                            // 重新从 localStorage 读一次（确保数据最新）
-                            const groupsRaw2 = localStorage.getItem('dialerCharGroups');
-                            if (!groupsRaw2) return;
-                            let groups2 = JSON.parse(groupsRaw2);
-                            groups2 = groups2.filter(g => g.chars && g.chars.length > 0);
-                            if (!groups2.length) return;
-
-                            const seq = buildMergedSequence(groups2);
-                            if (seq.length === 0) return;
-
-                            const displayedLen2 = typeof window.extraTextBlocksDisplayedLength === 'number'
-                                ? window.extraTextBlocksDisplayedLength : 0;
-
-                            console.log('[charSelect·自动] ⏳延迟检查 displayedLen=' + displayedLen2
-                                + ' 已触发=' + charSelectState.lastAutoTriggeredIdx
-                                + ' seqLen=' + seq.length);
-
-                            if (displayedLen2 <= 0) return;
-
-                            // 从后往前找 absoluteIndex < displayedLen2 的最后一个
-                            let match = null;
-                            for (let i = seq.length - 1; i >= 0; i--) {
-                                const idx = seq[i].absoluteIndex;
-                                if (idx != null && idx < displayedLen2) {
-                                    match = seq[i];
-                                    break;
-                                }
+                        if (scale > 1.0) {
+                            console.log('[charSelect·自动] ✅ 同步触发放大 scale=' + scale + ' dur=' + btnDur);
+                            if (match.image) {
+                                applyCharOverlay(keyElement, match.image);
                             }
-
-                            if (!match) {
-                                console.log('[charSelect·自动] ⏭️ 合并序列最小 idx=' + seq[0].absoluteIndex + ' > displayedLen=' + displayedLen2);
-                                return;
-                            }
-
-                            console.log('[charSelect·自动] 匹配: absoluteIndex=' + match.absoluteIndex
-                                + ' group=' + match.groupName + ' scale=' + match.scale
-                                + ' lastTriggered=' + charSelectState.lastAutoTriggeredIdx);
-
-                            if (match.absoluteIndex === charSelectState.lastAutoTriggeredIdx) {
-                                return; // 这个字已经触发过了
-                            }
-
-                            const params = getCharImgParams();
-                            const scale = match.scale || 1.0;
-                            const btnDur = params.btnDur;
-                            charSelectState.wasLastStep = true;
-                            charSelectState.lastAutoTriggeredIdx = match.absoluteIndex;
-
-                            if (scale > 1.0) {
-                                console.log('[charSelect·自动] ✅ 触发放大 scale=' + scale + ' dur=' + btnDur);
-                                // 📷 先创建 overlay（如果有图片）→ 再 applyTransform → sync 能生效
-                                if (match.image) {
-                                    applyCharOverlay(keyElement, match.image);
-                                }
-                                applyTransform(keyElement, scale, btnDur);
-                                applyBtnShadow(keyElement, !!match.image);  // 💡 加放大阴影（无图也加）
-                            } else {
-                                console.log('[charSelect·自动] ⚠️ scale=1.0 没单独设置放大倍数，跳过');
-                                if (match.image) {
-                                    applyCharOverlay(keyElement, match.image);
-                                    applyBtnShadow(keyElement, true);  // 💡 即使 scale=1.0，有图也加阴影
-                                }
-                            }
-                        } catch (e) {
-                            console.warn('自动模式延迟检查失败:', e);
+                            applyTransform(keyElement, scale, btnDur);
+                            applyBtnShadow(keyElement, !!match.image);
+                        } else if (match.image) {
+                            // scale=1.0 但有图片，也加图片 overlay + 阴影（不放大）
+                            applyCharOverlay(keyElement, match.image);
+                            applyBtnShadow(keyElement, true);
                         }
-                    }, 50); // 50ms 等打字逻辑先跑完
+                    } catch (e) {
+                        console.warn('自动模式匹配失败:', e);
+                    }
                 }
             } catch (e) {
                 console.warn('字符组匹配失败:', e);
@@ -597,6 +630,10 @@ const TouchSizeController = (function () {
     function applyOnRelease(keyElement, keyValue) {
         if (!keyElement) return;
         const mode = getMode();
+        console.log('[applyOnRelease] mode=' + mode + ' keyValue=' + keyValue
+            + ' | inlineTransform=' + JSON.stringify(keyElement.style.transform)
+            + ' | btn3d-pressed=' + keyElement.classList.contains('btn3d-pressed')
+            + ' | lockedElMatch=' + (charSelectState.lockedEl === keyElement));
         if (mode === 'disabled') return;
 
         if (mode === 'pressEnlarge') {
@@ -661,29 +698,33 @@ const TouchSizeController = (function () {
                 applyTransform(el, 1, releaseDur);
             });
         } else if (mode === 'charSelect') {
-            // 标记已松手：让自动模式 50ms 延迟回调感知松手，放弃延迟放大（防卡死）
-            charSelectState.pressingEl = null;
-            // 模式5（字符勾选）松手：
-            // - 最后一步触发的按钮 → 恢复默认 + 图片跟随缩小 + 同时淡出（三者同步并行）
-            // - 非最后一步（已锁定）→ 保持当前大小不变
-            // - 未匹配任何组 → 恢复默认 + 淡出移除
-            const isLocked = (charSelectState.lockedEl === keyElement);
-            if (charSelectState.wasLastStep || !isLocked) {
-                const params = getCharImgParams();
-                const releaseDur = params.btnDur || 180;
-                // 📷 先给 overlay 设好完整的 transition（含 top/left/width/height/opacity）
-                applyTransform(keyElement, 1, releaseDur);       // 按钮缩小 + 图片同步缩小
-                // 📷 现在 fadeOutAndRemove 不会覆盖 transition！只会把 opacity 设为 0
-                removeCharOverlay(keyElement);                    // 图片淡出（和缩小并行）
-                removeBtnShadow(keyElement);
-                // 三者同步开始：按钮缩小 releaseDur + 图片缩小 releaseDur + 图片淡出 fadeOut
+            // 模式5（字符勾选）松手：所有步骤一律还原！
+            // 用户期望"按下即放大+显示图片，松手即还原+图片淡出"的闭环交互
+            // 之前的 isLocked 守卫会让非最后一步保持锁定，但用户不需要这种"保持放大"行为
+            const params = getCharImgParams();
+            const releaseDur = params.btnDur || 180;
+            console.log('[applyOnRelease·charSelect] → applyTransform(scale=1) dur=' + releaseDur);
+            // 按钮缩小回1 + 图片 overlay 同步淡出 + 阴影淡出（三者并行）
+            applyTransform(keyElement, 1, releaseDur);
+            console.log('[applyOnRelease·charSelect] → after applyTransform inlineTransform=' + JSON.stringify(keyElement.style.transform));
+            removeCharOverlay(keyElement);
+            removeBtnShadow(keyElement);
+            console.log('[applyOnRelease·charSelect] → overlay+shadow removed');
+            // 清理锁定状态（让下次按下能正常重新匹配组）
+            if (charSelectState.lockedEl === keyElement) {
+                charSelectState.lockedEl = null;
+                charSelectState.lockedKeyValue = null;
             }
             charSelectState.wasLastStep = false;
+            console.log('[applyOnRelease·charSelect] ✅ DONE');
         }
     }
 
     /**
      * 将缩放变换应用到按钮元素
+     * 使用 setProperty(..., 'important') 强制覆盖 CSS 规则的 !important transform
+     * （3D 按钮 candy/keyboard 样式的 btn3d-pressed 类有 transform: translateY(Xpx) !important，
+     *  会覆盖普通内联 transform: scale(X)，导致按钮无法按 JS 期望缩放）
      * @param {HTMLElement} el 按钮元素
      * @param {number} scale 缩放比例（1 = 100%）
      * @param {number} durationMs 动画时长（毫秒）
@@ -692,8 +733,10 @@ const TouchSizeController = (function () {
         el.style.transition = durationMs > 0
             ? `transform ${durationMs}ms ease, z-index 0s`
             : 'none';
-        el.style.transform = `scale(${scale})`;
-        el.style.transformOrigin = 'center center';
+        // 🔑 关键：用 setProperty + 'important' 覆盖 3D 按钮样式的 !important transform
+        // 这样 candy/keyboard 的 btn3d-pressed translateY 就不会干扰 JS 设定的 scale
+        el.style.setProperty('transform', `scale(${scale})`, 'important');
+        el.style.setProperty('transform-origin', 'center center', 'important');
         if (scale > 1) {
             el.style.zIndex = '50';
         } else {
@@ -701,6 +744,7 @@ const TouchSizeController = (function () {
         }
         // ===== 同步更新 outside 图片 overlay（让它跟按钮同步过渡）=====
         syncOutsideOverlay(el, scale, durationMs);
+        console.log('[applyTransform] scale=' + scale + ' inlineTransform=' + JSON.stringify(el.style.transform));
     }
 
     /**
@@ -753,13 +797,18 @@ const TouchSizeController = (function () {
             if (raw) {
                 const p = JSON.parse(raw);
                 const validFit = ['cover', 'contain', 'outside'];
+                // 🔴 修复：shadowEnabled 严格等于 true 才开启（和管理页面默认值一致：默认关闭）
+                // 之前 p.shadowEnabled !== false 会导致 localStorage 有旧数据但没 shadowEnabled 字段时默认开启
+                // 现在：只有明确设为 true 才开启，undefined/false/其他都关闭
+                const shadowEnabled = p.shadowEnabled === true;
+                console.log('[getCharImgParams] shadowEnabled=' + shadowEnabled + ' raw=' + p.shadowEnabled);
                 return {
                     fadeIn: parseInt(p.fadeIn) || 200,
                     fadeOut: parseInt(p.fadeOut) || 200,
                     btnDur: parseInt(p.btnDur) || 180,
                     objectFit: validFit.includes(p.objectFit) ? p.objectFit : 'cover',
-                    outsideFit: p.outsideFit === 'height' ? 'height' : 'width',  // 新增：默认宽对齐
-                    shadowEnabled: p.shadowEnabled !== false,
+                    outsideFit: p.outsideFit === 'height' ? 'height' : 'width',
+                    shadowEnabled: shadowEnabled,
                     shadowColor: p.shadowColor || '#ff6b35',
                     shadowBlur: parseInt(p.shadowBlur) || 24,
                     shadowOpacity: parseFloat(p.shadowOpacity) || 0.6,
@@ -793,15 +842,16 @@ const TouchSizeController = (function () {
     function applyBtnShadow(btnEl, hasImage) {
         if (!btnEl) return;
         const p = getCharImgParams();
+        console.log('[applyBtnShadow] shadowEnabled=' + p.shadowEnabled + ' hasImage=' + hasImage + ' objectFit=' + p.objectFit);
         // 阴影总开关关闭：清除阴影并返回
         if (p.shadowEnabled === false) {
             btnEl.style.boxShadow = '';
             return;
         }
-        // outside 模式且本次有图片叠加：阴影跟随图片 overlay，按钮不另加
-        if (p.objectFit === 'outside' && hasImage) {
-            return;
-        }
+        // 🔴 修复：outside 模式下按钮自身也加阴影！
+        // 之前 outside 模式直接 return，只有 outside overlay 有阴影，按钮本身没有
+        // 用户期望：无论哪种模式，放大的按钮都应该有阴影效果
+        // （outside overlay 的阴影是额外的，按钮阴影是基础的）
         if (!p.shadowBlur || p.shadowOpacity <= 0) {
             btnEl.style.boxShadow = '';
             return;
@@ -813,6 +863,7 @@ const TouchSizeController = (function () {
         const cleaned = tr.split(',').filter(s => s.trim() && !/box-shadow/i.test(s)).join(',');
         btnEl.style.transition = (cleaned ? cleaned + ', ' : '') + `box-shadow ${fadeIn}ms ease`;
         btnEl.style.boxShadow = `0 0 ${p.shadowBlur}px ${color}, inset 0 0 ${Math.round(p.shadowBlur/2)}px ${color}`;
+        console.log('[applyBtnShadow] ✅ 应用阴影 blur=' + p.shadowBlur + ' opacity=' + p.shadowOpacity);
     }
 
     /**
@@ -880,6 +931,13 @@ const TouchSizeController = (function () {
             return;
         } else {
             // ===== cover / contain 模式：inside 按钮 =====
+            // 🔴 修复：overlay 上的阴影也受 shadowEnabled 控制（之前硬编码了一个 8px 阴影！）
+            let insideOverlayShadow = '';
+            // 🔴 修复：严格等于 true 才加阴影（和 getCharImgParams 逻辑一致）
+            if (params.shadowEnabled === true && params.shadowBlur > 0 && params.shadowOpacity > 0) {
+                const color2 = hexToRgba(params.shadowColor, params.shadowOpacity * 0.7);
+                insideOverlayShadow = `box-shadow: 0 0 ${Math.round(params.shadowBlur * 0.6)}px ${color2};`;
+            }
             overlay.style.cssText = [
                 'position: absolute',
                 'top: 0', 'left: 0',
@@ -890,7 +948,7 @@ const TouchSizeController = (function () {
                 'z-index: 60',
                 'opacity: 0',
                 `transition: opacity ${params.fadeIn}ms ease`,
-                params.shadowEnabled !== false ? 'box-shadow: 0 0 8px rgba(0,0,0,0.2)' : '',
+                insideOverlayShadow,
                 '-webkit-user-drag: none',
                 'user-select: none',
             ].join(';');
@@ -943,9 +1001,11 @@ const TouchSizeController = (function () {
 
         // ===== 阴影参数只影响 box-shadow，彻底不参与尺寸计算 =====
         let outsideShadow = '';
-        if (params.shadowEnabled !== false && params.shadowBlur > 0 && params.shadowOpacity > 0) {
+        // 🔴 修复：严格等于 true 才加阴影（和 getCharImgParams 逻辑一致）
+        if (params.shadowEnabled === true && params.shadowBlur > 0 && params.shadowOpacity > 0) {
             const color = hexToRgba(params.shadowColor, params.shadowOpacity);
             outsideShadow = `box-shadow: 0 0 ${params.shadowBlur}px ${color};`;
+            console.log('[outsideLayout] ✅ outside overlay 加阴影 blur=' + params.shadowBlur);
         }
 
         overlay.style.cssText = [
@@ -981,21 +1041,28 @@ const TouchSizeController = (function () {
      */
     function removeCharOverlay(btnEl) {
         if (!btnEl) return;
+        console.log('[removeCharOverlay] called, btnKey=' + (btnEl.getAttribute('data-key') || 'unknown'));
         // 1. 先清按钮内的 overlay（cover/contain 模式）
         const inside = btnEl.querySelector('.char-image-overlay');
         if (inside) {
+            console.log('[removeCharOverlay] found inside overlay');
             fadeOutAndRemove(inside);
         }
         // 2. 再清 body 上的 outside overlay（用 data-key 唯一标识）
         const btnKey = btnEl.getAttribute('data-key') || btnEl.id || btnEl.className;
-        document.querySelectorAll(`.char-image-overlay[data-for-btn="${btnKey}"]`).forEach(el => {
+        const outsideList = document.querySelectorAll(`.char-image-overlay[data-for-btn="${btnKey}"]`);
+        console.log('[removeCharOverlay] found outside overlays: ' + outsideList.length);
+        outsideList.forEach(el => {
             fadeOutAndRemove(el);
         });
     }
 
     /** 通用淡出并移除 DOM */
     function fadeOutAndRemove(el) {
-        if (!el || el._removing) return;
+        if (!el || el._removing) {
+            console.log('[fadeOutAndRemove] skipped (already removing or null)');
+            return;
+        }
         el._removing = true;
         const params = getCharImgParams();
         // 🔑 关键：只替换 transition 里的 opacity 项（用 fadeOut duration），保留已有的 top/left/width/height 过渡
@@ -1010,10 +1077,12 @@ const TouchSizeController = (function () {
             el.style.transition = fadeOutTrans;
         }
         el.style.opacity = '0';
+        console.log('[fadeOutAndRemove] opacity→0, duration=' + params.fadeOut + 'ms, transition=' + el.style.transition);
         // 只等 opacity 过渡结束再移除（不被 width/height 的 transitionend 干扰）
         el.addEventListener('transitionend', function onEnd(e) {
             if (e.propertyName === 'opacity') {
                 el.removeEventListener('transitionend', onEnd);
+                console.log('[fadeOutAndRemove] transitionend opacity → removing DOM');
                 if (el.parentNode) el.parentNode.removeChild(el);
             }
         });
@@ -1038,7 +1107,11 @@ const TouchSizeController = (function () {
         getRippleConfig,
         getTextPreviewScaleConfig,
         applyOnPress,
-        applyOnRelease
+        applyOnRelease,
+        // 暴露阴影和图片移除函数，供外部统一释放逻辑调用
+        removeBtnShadow,
+        removeCharOverlay,
+        applyBtnShadow
     };
 })();
 
@@ -1229,6 +1302,7 @@ function applyDefaultColors() {
                 background: radial-gradient(circle at 35% 30%, #fefefe, #dcdce1 45%, #a8a8b0 78%, #8b8b93) !important;
                 box-shadow: 0 8px 16px rgba(0,0,0,.22), inset 0 -6px 12px rgba(0,0,0,.14), inset 0 5px 10px rgba(255,255,255,.85) !important;
             }
+            [data-key].btn3d-sphere:active,
             [data-key].btn3d-sphere.btn3d-pressed {
                 background: radial-gradient(circle at 35% 30%, #d4d4d9, #bcbcc3 50%, #98989f 80%) !important;
                 box-shadow: inset 0 5px 12px rgba(0,0,0,.28), 0 2px 5px rgba(0,0,0,.12) !important;
@@ -1237,6 +1311,7 @@ function applyDefaultColors() {
                 background: #e6e7eb !important;
                 box-shadow: 7px 7px 14px #c3c4c8, -7px -7px 14px #ffffff !important;
             }
+            [data-key].btn3d-neumorph:active,
             [data-key].btn3d-neumorph.btn3d-pressed {
                 box-shadow: inset 5px 5px 10px #c3c4c8, inset -5px -5px 10px #ffffff !important;
             }
@@ -1247,6 +1322,7 @@ function applyDefaultColors() {
                 backdrop-filter: blur(8px);
                 -webkit-backdrop-filter: blur(8px);
             }
+            [data-key].btn3d-glass:active,
             [data-key].btn3d-glass.btn3d-pressed {
                 background: linear-gradient(135deg, rgba(255,255,255,.45), rgba(255,255,255,.12)) !important;
                 box-shadow: inset 0 4px 10px rgba(31,38,135,.15), 0 4px 12px rgba(31,38,135,.10) !important;
@@ -1256,6 +1332,7 @@ function applyDefaultColors() {
                 box-shadow: 0 11px 0 #0f5a9e, 0 14px 20px rgba(15,90,158,.35) !important;
                 transition: transform .12s ease, box-shadow .12s ease !important;
             }
+            [data-key].btn3d-candy:active,
             [data-key].btn3d-candy.btn3d-pressed {
                 transform: translateY(7px) !important;
                 box-shadow: 0 4px 0 #0f5a9e, 0 6px 10px rgba(15,90,158,.30) !important;
@@ -1273,12 +1350,14 @@ function applyDefaultColors() {
                 border-radius: 14px !important;
                 transition: transform .12s ease, box-shadow .12s ease, background-color .12s ease, color .12s ease !important;
             }
+            [data-key].btn3d-keyboard:active,
             [data-key].btn3d-keyboard.btn3d-pressed {
                 transform: translateY(var(--kb-depth, 3px)) !important;
                 background: var(--kb-press-bg, #e0e2e6) !important;
                 /* 底座保留一部分厚边 + 内阴影模拟键帽陷入底座 */
                 box-shadow: 0 3px 0 #3a3f4a, inset 0 3px 6px rgba(0,0,0,.22), 0 5px 8px rgba(0,0,0,.16) !important;
             }
+            [data-key].btn3d-keyboard:active, [data-key].btn3d-keyboard:active *,
             [data-key].btn3d-keyboard.btn3d-pressed, [data-key].btn3d-keyboard.btn3d-pressed * {
                 color: var(--kb-press-text, #1a1d24) !important;
             }
@@ -1471,17 +1550,16 @@ function applyDefaultColors() {
     }
 
     /**
-     * 在按钮指定位置生成水波纹扩散动画（空心白环）
+     * 在按钮中心生成水波纹扩散动画（空心白环）
      * 效果：从按钮尺寸开始放大到设置的最大尺寸，透明度 0→1→0，内部透明边缘渐白
+     * 起点固定为按钮几何中心（从按钮外部完全展开，不受按钮边界限制）
      * @param {HTMLElement} keyElement - 被按下的按钮
-     * @param {number} x - 相对于按钮的点击 x 坐标
-     * @param {number} y - 相对于按钮的点击 y 坐标
      */
-    function createRipple(keyElement, x, y) {
+    function createRipple(keyElement) {
         const cfg = getRippleConfig();
         if (!cfg.enabled || !keyElement) return;
         ensureRippleStyleTag();
-        // 获取按钮在视口中的位置和尺寸
+        // 获取按钮在视口中的位置和尺寸，水波纹从按钮中心开始扩散
         const rect = keyElement.getBoundingClientRect();
         const btnSize = Math.max(rect.width, rect.height);
         const centerX = rect.left + rect.width / 2;
@@ -1534,6 +1612,116 @@ function initDialer() {
     const keyElements = document.querySelectorAll('[data-key]');
     let phoneNumberValue = '';
     let pressedKeys = {}; // 用于跟踪已按下的键，防止长按重复输入
+    
+    /**
+     * 规范化按键值为 data-key 命名空间
+     * 键盘事件中 i→*、o→0、p→#，数字键保持原样
+     * 确保键盘/鼠标/触摸三种输入方式共享同一份 pressedKeys
+     * @param {string} rawKey - 原始按键值（可能来自键盘事件 e.key 或按钮 data-key）
+     * @returns {string} 规范化后的 data-key 值
+     */
+    function normalizeKeyValue(rawKey) {
+        if (typeof rawKey !== 'string') return '';
+        const lower = rawKey.toLowerCase();
+        if (lower === 'i') return '*';
+        if (lower === 'o') return '0';
+        if (lower === 'p') return '#';
+        return rawKey;
+    }
+
+    /**
+     * 统一的按键释放清理函数
+     * 所有松手事件（mouseup/mouseleave/touchend/touchcancel/keyup）都调用此函数
+     * 包含：清除 pressedKeys、移除视觉状态、恢复颜色、淡出图片/音频、
+     *       隐藏GIF、恢复按钮尺寸（由 TouchSizeController.applyOnRelease 处理模式相关的阴影/overlay/缩放）
+     *
+     * ⚠️ 注意：不在这里直接调用 removeBtnShadow/removeCharOverlay，
+     * 因为模式5有"锁定按钮保持放大"的逻辑，需要由 applyOnRelease 按模式分支决定是否清理。
+     * 如果无条件在这里清理，会破坏模式5锁定按钮的阴影和图片保持效果。
+     *
+     * @param {HTMLElement} keyElement - 被按下的按钮元素
+     * @param {string} keyValue - 规范化后的按键值（data-key 命名空间）
+     */
+    function releaseKey(keyElement, keyValue) {
+        if (!keyElement) return;
+        console.log('[releaseKey] 🎯 called! keyValue=' + keyValue
+            + ' | btn3d-pressed=' + keyElement.classList.contains('btn3d-pressed'));
+
+        // 1. 清除 pressedKeys 中的对应键状态（防止后续长按被误判为已按下）
+        if (keyValue) {
+            delete pressedKeys[keyValue];
+        }
+
+        // 2. 移除按下状态类（基础 + 3D按钮）
+        keyElement.classList.remove('key-pressed');
+        keyElement.classList.remove('btn3d-pressed');
+
+        // 3. 恢复按钮默认背景色
+        keyElement.style.backgroundColor = keyNormalColor;
+        // 恢复数字默认颜色
+        keyElement.style.color = numberNormalColor;
+        // 恢复字母默认颜色
+        const labelElement = keyElement.querySelector('.ios-key-label');
+        if (labelElement) {
+            labelElement.style.color = letterNormalColor;
+        }
+
+        // 4. 隐藏按钮图片（带过渡动画）
+        const imgContainer = keyElement.querySelector('.key-image-container');
+        if (imgContainer) {
+            const img = imgContainer.querySelector('img');
+            if (img) {
+                img.style.transition = 'opacity ' + (imageReleaseAnimationDuration / 1000) + 's ease';
+                img.style.opacity = '0';
+            }
+        }
+
+        // 5. 淡出当前播放的音频
+        fadeOutAudio(currentPlayingAudio);
+
+        // 6. 模式7：隐藏 GIF 弹出
+        try { hideGifPopup(keyElement); } catch (e) {}
+
+        // 7. 模式相关的清理（缩放恢复、阴影移除、图片overlay移除）全部由 applyOnRelease 处理
+        // applyOnRelease 内部按模式分支决定还原策略
+        if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease && keyValue) {
+            TouchSizeController.applyOnRelease(keyElement, keyValue);
+        }
+
+        // 🔑 8. 终极兜底：无论上面怎么执行，这里强制清除 charSelect 的所有视觉效果
+        // 防止 applyOnRelease 因为任何原因（模式不匹配、内部异常等）跳过了还原逻辑
+        try {
+            const modeName = (typeof TouchSizeController !== 'undefined' && TouchSizeController.getMode)
+                ? TouchSizeController.getMode() : '';
+            if (modeName === 'charSelect') {
+                // 强制还原 transform（用 setProperty important 覆盖 3D 按钮 !important）
+                keyElement.style.setProperty('transform', 'scale(1)', 'important');
+                keyElement.style.setProperty('transform-origin', 'center center', 'important');
+                keyElement.style.zIndex = '';
+                // 强制清除所有 char-select overlay（inside + outside）
+                const inside = keyElement.querySelector('.char-image-overlay');
+                if (inside && inside._removing !== true) {
+                    inside._removing = true;
+                    inside.style.opacity = '0';
+                    setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
+                }
+                const btnKey = keyElement.getAttribute('data-key') || keyElement.id || '';
+                document.querySelectorAll(`.char-image-overlay[data-for-btn="${btnKey}"]`).forEach(el => {
+                    if (el._removing) return;
+                    el._removing = true;
+                    el.style.opacity = '0';
+                    setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+                });
+                // 强制清除阴影
+                if (typeof TouchSizeController !== 'undefined' && TouchSizeController.removeBtnShadow) {
+                    TouchSizeController.removeBtnShadow(keyElement);
+                }
+                console.log('[releaseKey] 🔧 兜底清理 charSelect 效果完成');
+            }
+        } catch (e) {
+            console.warn('[releaseKey] 兜底清理失败:', e);
+        }
+    }
     
     /**
      * 获取按钮的自定义图片数据
@@ -2155,13 +2343,11 @@ function initDialer() {
             
             // 标记键为已按下
             pressedKeys[keyValue] = true;
+
+            // 模式6：触摸按下同步 3D 按压效果（无 3D class 时无副作用）
+            this.classList.add('btn3d-pressed');
             
-            // 计算触摸点相对于按钮的坐标（用于水波纹定位）
-            const tRect = this.getBoundingClientRect();
-            const touch = e.touches && e.touches[0];
-            const tx = touch ? (touch.clientX - tRect.left) : this.offsetWidth / 2;
-            const ty = touch ? (touch.clientY - tRect.top) : this.offsetHeight / 2;
-            handleKeyPress(keyValue, this, tx, ty);
+            handleKeyPress(keyValue, this);
         });
         
         // 对于桌面设备，仍使用mousedown和mouseup事件以提供更好的交互体验
@@ -2179,159 +2365,85 @@ function initDialer() {
             
             // 标记键为已按下
             pressedKeys[keyValue] = true;
+
+            // 模式6：鼠标按下同步 3D 按压效果（无 3D class 时无副作用）
+            this.classList.add('btn3d-pressed');
             
-            // 计算鼠标点相对于按钮的坐标（用于水波纹定位）
-            const mRect = this.getBoundingClientRect();
-            const mx = e.clientX - mRect.left;
-            const my = e.clientY - mRect.top;
-            handleKeyPress(keyValue, this, mx, my);
+            handleKeyPress(keyValue, this);
         });
         
-        // 鼠标松开事件
+        // 鼠标松开事件 → 统一释放清理
         key.addEventListener('mouseup', function() {
-            // 清除pressedKeys中的对应键状态
             const keyValue = this.getAttribute('data-key');
-            if (keyValue) {
-                delete pressedKeys[keyValue];
+            console.log('[EVENT] 🖱️ mouseup fired for key=' + keyValue);
+            // 🔴 硬编码兜底还原：直接操作 DOM，绕过所有中间函数
+            this.style.setProperty('transform', 'scale(1)', 'important');
+            this.style.zIndex = '';
+            document.querySelectorAll(`.char-image-overlay[data-for-btn="${keyValue}"]`).forEach(function(el) {
+                el.style.opacity = '0';
+                setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+            });
+            // 也清理按钮内的 overlay
+            const inside = this.querySelector('.char-image-overlay');
+            if (inside) {
+                inside.style.opacity = '0';
+                setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
             }
-
-            this.classList.remove('key-pressed');
-            // 模式6：松手移除 3D 按压效果，确保按钮自动弹起
-            this.classList.remove('btn3d-pressed');
-            // 恢复按钮的默认背景颜色
-            this.style.backgroundColor = keyNormalColor;
-            // 恢复数字的默认颜色
-            this.style.color = numberNormalColor;
-            // 恢复字母的默认颜色
-            const labelElement = this.querySelector('.ios-key-label');
-            if (labelElement) {
-                labelElement.style.color = letterNormalColor;
-            }
-            // 隐藏按钮图片（将透明度设置回0）
-            const imgContainer = this.querySelector('.key-image-container');
-            if (imgContainer) {
-                const img = imgContainer.querySelector('img');
-                if (img) {
-                    // 设置松手动画时间
-                    img.style.transition = 'opacity ' + (imageReleaseAnimationDuration / 1000) + 's ease';
-                    img.style.opacity = '0'; // 松开时恢复为透明
-                }
-            }
-            // 当鼠标松开时，使用默认淡出时间逐步降低当前播放音频的音量
-            fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
-            // 模式7：隐藏 GIF 弹出
-            try { hideGifPopup(this); } catch (e) {}
-            // 恢复按钮的默认大小尺寸（由后台「按钮触摸大小变换设置」控制）
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease) {
-                TouchSizeController.applyOnRelease(this, keyValue);
-            }
+            releaseKey(this, keyValue);
         });
 
-        // 鼠标离开事件
+        // 鼠标离开事件 → 统一释放清理（之前遗漏了 pressedKeys、阴影/overlay 等）
         key.addEventListener('mouseleave', function() {
-            this.classList.remove('key-pressed');
-            // 模式6：鼠标离开也移除 3D 按压效果，防止卡在下沉状态
-            this.classList.remove('btn3d-pressed');
-            // 恢复按钮的默认背景颜色
-            this.style.backgroundColor = keyNormalColor;
-            // 恢复数字的默认颜色
-            this.style.color = numberNormalColor;
-            // 恢复字母的默认颜色
-            const labelElement = this.querySelector('.ios-key-label');
-            if (labelElement) {
-                labelElement.style.color = letterNormalColor;
+            const keyValue = this.getAttribute('data-key');
+            console.log('[EVENT] 🖱️ mouseleave fired for key=' + keyValue);
+            this.style.setProperty('transform', 'scale(1)', 'important');
+            this.style.zIndex = '';
+            document.querySelectorAll(`.char-image-overlay[data-for-btn="${keyValue}"]`).forEach(function(el) {
+                el.style.opacity = '0';
+                setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+            });
+            const inside = this.querySelector('.char-image-overlay');
+            if (inside) {
+                inside.style.opacity = '0';
+                setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
             }
-            // 隐藏按钮图片（将透明度设置回0）
-            const imgContainer = this.querySelector('.key-image-container');
-            if (imgContainer) {
-                const img = imgContainer.querySelector('img');
-                if (img) {
-                    img.style.opacity = '0'; // 鼠标离开时恢复为透明
-                }
-            }
-            // 当鼠标离开按键时，使用默认淡出时间逐步降低当前播放音频的音量
-            fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
-            // 模式7：隐藏 GIF 弹出
-            try { hideGifPopup(this); } catch (e) {}
-            // 鼠标离开时恢复按钮的默认大小尺寸
-            const mouseLeaveKeyValue = this.getAttribute('data-key');
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease && mouseLeaveKeyValue) {
-                TouchSizeController.applyOnRelease(this, mouseLeaveKeyValue);
-            }
+            releaseKey(this, keyValue);
         });
 
-        // 触摸结束事件
+        // 触摸结束事件 → 统一释放清理
         key.addEventListener('touchend', function() {
-            // 清除pressedKeys中的对应键状态
             const keyValue = this.getAttribute('data-key');
-            if (keyValue) {
-                delete pressedKeys[keyValue];
+            console.log('[EVENT] 👆 touchend fired for key=' + keyValue);
+            this.style.setProperty('transform', 'scale(1)', 'important');
+            this.style.zIndex = '';
+            document.querySelectorAll(`.char-image-overlay[data-for-btn="${keyValue}"]`).forEach(function(el) {
+                el.style.opacity = '0';
+                setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+            });
+            const inside = this.querySelector('.char-image-overlay');
+            if (inside) {
+                inside.style.opacity = '0';
+                setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
             }
-
-            this.classList.remove('key-pressed');
-            // 模式6：触摸结束移除 3D 按压效果，确保按钮自动弹起
-            this.classList.remove('btn3d-pressed');
-            // 恢复按钮的默认背景颜色
-            this.style.backgroundColor = keyNormalColor;
-            // 恢复数字的默认颜色
-            this.style.color = numberNormalColor;
-            // 恢复字母的默认颜色
-            const labelElement = this.querySelector('.ios-key-label');
-            if (labelElement) {
-                labelElement.style.color = letterNormalColor;
-            }
-            // 隐藏按钮图片（将透明度设置回0）
-            const imgContainer = this.querySelector('.key-image-container');
-            if (imgContainer) {
-                const img = imgContainer.querySelector('img');
-                if (img) {
-                    img.style.opacity = '0'; // 触摸结束时恢复为透明
-                }
-            }
-            // 模式7：隐藏 GIF 弹出
-            try { hideGifPopup(this); } catch (e) {}
-            // 当触摸结束时，使用默认淡出时间逐步降低当前播放音频的音量
-            fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
-            // 触摸结束时恢复按钮的默认大小尺寸
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease) {
-                TouchSizeController.applyOnRelease(this, keyValue);
-            }
+            releaseKey(this, keyValue);
         });
         
-        // 触摸取消事件
+        // 触摸取消事件 → 统一释放清理（之前遗漏了 pressedKeys、GIF、TouchSizeController、阴影等）
         key.addEventListener('touchcancel', function() {
-            const cancelKeyValue = this.getAttribute('data-key');
-            if (cancelKeyValue) {
-                delete pressedKeys[cancelKeyValue];
+            const keyValue = this.getAttribute('data-key');
+            console.log('[EVENT] ⚠️ touchcancel fired for key=' + keyValue);
+            this.style.setProperty('transform', 'scale(1)', 'important');
+            this.style.zIndex = '';
+            document.querySelectorAll(`.char-image-overlay[data-for-btn="${keyValue}"]`).forEach(function(el) {
+                el.style.opacity = '0';
+                setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+            });
+            const inside = this.querySelector('.char-image-overlay');
+            if (inside) {
+                inside.style.opacity = '0';
+                setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
             }
-            this.classList.remove('key-pressed');
-            // 模式6：触摸取消也要移除 3D 按压效果，确保按钮自动弹起
-            this.classList.remove('btn3d-pressed');
-            // 恢复按钮的默认背景颜色
-            this.style.backgroundColor = keyNormalColor;
-            // 恢复数字的默认颜色
-            this.style.color = numberNormalColor;
-            // 恢复字母的默认颜色
-            const labelElement = this.querySelector('.ios-key-label');
-            if (labelElement) {
-                labelElement.style.color = letterNormalColor;
-            }
-            // 隐藏按钮图片（将透明度设置回0）
-            const imgContainer = this.querySelector('.key-image-container');
-            if (imgContainer) {
-                const img = imgContainer.querySelector('img');
-                if (img) {
-                    img.style.opacity = '0'; // 触摸取消时恢复为透明
-                }
-            }
-            // 当触摸取消时，使用默认淡出时间逐步降低当前播放音频的音量
-            fadeOutAudio(currentPlayingAudio); // 使用配置的淡出时间实现平滑渐变
-            // 触摸取消时恢复按钮默认大小尺寸
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease) {
-                TouchSizeController.applyOnRelease(this, cancelKeyValue);
-            }
-            // 模式7：触摸取消也要隐藏 GIF 弹出
-            try { hideGifPopup(this); } catch (e) {}
+            releaseKey(this, keyValue);
         });
     });
     
@@ -2344,107 +2456,66 @@ function initDialer() {
     
     // 添加键盘事件监听
     document.addEventListener('keydown', function(e) {
-        let keyValue = e.key;
+        const rawKey = e.key;
+        // 规范化按键值到 data-key 命名空间（i→*, o→0, p→#）
+        const normKey = normalizeKeyValue(rawKey);
         
-        // 检查键是否已经被按下，防止长按重复输入
-        if (pressedKeys[keyValue]) {
+        // 只处理拨号键盘相关按键（数字 + * + 0 + #）
+        const isDialerKey = /^[0-9*#]$/.test(normKey);
+        if (!isDialerKey) {
+            // 非拨号键：只处理 Backspace/Delete/Enter
+            if (rawKey === 'Backspace' || rawKey === 'Delete') {
+                e.preventDefault();
+                deleteLastCharacter();
+            } else if (rawKey === 'Enter') {
+                e.preventDefault();
+                console.log('拨打电话:', phoneNumberValue);
+            }
             return;
         }
         
-        // 标记键为已按下
-        pressedKeys[keyValue] = true;
+        // 检查规范键是否已被按下，防止长按重复输入
+        if (pressedKeys[normKey]) {
+            return;
+        }
         
-        // 处理数字键
-        if (/^[0-9]$/.test(keyValue)) {
-            e.preventDefault();
-            const keyElement = document.querySelector(`[data-key="${keyValue}"]`);
-            // 模式6：键盘按下同步 3D 按压效果（无 3D class 时无副作用）
-            if (keyElement) keyElement.classList.add('btn3d-pressed');
-            handleKeyPress(keyValue, keyElement);
-        }
-        // 处理特殊按键映射：i -> *, o -> 0, p -> #
-        else if (keyValue.toLowerCase() === 'i') {
-            e.preventDefault();
-            const keyElement = document.querySelector('[data-key="*"]');
-            if (keyElement) keyElement.classList.add('btn3d-pressed');
-            handleKeyPress('*', keyElement);
-        }
-        else if (keyValue.toLowerCase() === 'o') {
-            e.preventDefault();
-            const keyElement = document.querySelector('[data-key="0"]');
-            if (keyElement) keyElement.classList.add('btn3d-pressed');
-            handleKeyPress('0', keyElement);
-        }
-        else if (keyValue.toLowerCase() === 'p') {
-            e.preventDefault();
-            const keyElement = document.querySelector('[data-key="#"]');
-            if (keyElement) keyElement.classList.add('btn3d-pressed');
-            handleKeyPress('#', keyElement);
-        }
-        // 处理删除键
-        else if (keyValue === 'Backspace' || keyValue === 'Delete') {
-            e.preventDefault();
-            deleteLastCharacter();
-        }
-        // 处理回车键作为拨号键（预留功能）
-        else if (keyValue === 'Enter') {
-            e.preventDefault();
-            console.log('拨打电话:', phoneNumberValue);
-        }
+        // 标记键为已按下（使用规范化后的 data-key 值，与鼠标/触摸共享命名空间）
+        pressedKeys[normKey] = true;
+        
+        e.preventDefault();
+        const keyElement = document.querySelector(`[data-key="${normKey}"]`);
+        // 模式6：键盘按下同步 3D 按压效果（无 3D class 时无副作用）
+        if (keyElement) keyElement.classList.add('btn3d-pressed');
+        handleKeyPress(normKey, keyElement);
     });
     
-    // 添加keyup事件，清除按键状态
+    // 添加keyup事件，清除按键状态 → 统一使用 releaseKey + 硬编码 DOM 兜底还原
     document.addEventListener('keyup', function(e) {
-        delete pressedKeys[e.key];
+        const rawKey = e.key;
+        // 规范化按键值到 data-key 命名空间（与 keydown 保持一致）
+        const normKey = normalizeKeyValue(rawKey);
         
-        // 确保键盘松手后也使用配置的淡出时间实现平滑的音频渐变效果
-        fadeOutAudio(currentPlayingAudio);
+        // 只处理拨号键盘相关按键
+        const isDialerKey = /^[0-9*#]$/.test(normKey);
+        if (!isDialerKey) return;
         
-        // 清除视觉反馈
-        const keyValue = e.key;
-        let elementToUpdate = null;
-        
-        if (/^[0-9]$/.test(keyValue)) {
-            elementToUpdate = document.querySelector(`[data-key="${keyValue}"]`);
-        } else if (keyValue.toLowerCase() === 'i') {
-            elementToUpdate = document.querySelector('[data-key="*"]');
-        } else if (keyValue.toLowerCase() === 'o') {
-            elementToUpdate = document.querySelector('[data-key="0"]');
-        } else if (keyValue.toLowerCase() === 'p') {
-            elementToUpdate = document.querySelector('[data-key="#"]');
+        const keyElement = document.querySelector(`[data-key="${normKey}"]`);
+        console.log('[EVENT] ⌨️ keyup fired for key=' + normKey + ' keyElement=' + !!keyElement);
+        if (keyElement) {
+            // 🔴 硬编码兜底还原：直接操作 DOM，绕过所有中间函数（与 mouseup/touchend 完全一致）
+            keyElement.style.setProperty('transform', 'scale(1)', 'important');
+            keyElement.style.zIndex = '';
+            document.querySelectorAll(`.char-image-overlay[data-for-btn="${normKey}"]`).forEach(function(el) {
+                el.style.opacity = '0';
+                setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+            });
+            const inside = keyElement.querySelector('.char-image-overlay');
+            if (inside) {
+                inside.style.opacity = '0';
+                setTimeout(() => { if (inside.parentNode) inside.parentNode.removeChild(inside); }, 250);
+            }
         }
-        
-        if (elementToUpdate) {
-            elementToUpdate.classList.remove('key-pressed');
-            // 模式6：键盘松手同步移除 3D 按压效果
-            elementToUpdate.classList.remove('btn3d-pressed');
-            // 恢复按钮的默认背景颜色
-            elementToUpdate.style.backgroundColor = keyNormalColor;
-            // 恢复数字的默认颜色
-            elementToUpdate.style.color = numberNormalColor;
-            // 恢复字母的默认颜色
-            const labelElement = elementToUpdate.querySelector('.ios-key-label');
-            if (labelElement) {
-                labelElement.style.color = letterNormalColor;
-            }
-            // 隐藏按钮图片（将透明度设置回0）
-            const imgContainer = elementToUpdate.querySelector('.key-image-container');
-            if (imgContainer) {
-                const img = imgContainer.querySelector('img');
-                if (img) {
-                    // 设置松手动画时间
-                    img.style.transition = 'opacity ' + (imageReleaseAnimationDuration / 1000) + 's ease';
-                    img.style.opacity = '0'; // 键盘松开时恢复为透明
-                }
-            }
-            // 键盘松开时恢复按钮的默认大小尺寸
-            const dialerKey = elementToUpdate.getAttribute('data-key');
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnRelease && dialerKey) {
-                TouchSizeController.applyOnRelease(elementToUpdate, dialerKey);
-            }
-            // 模式7：键盘松手隐藏 GIF 弹出
-            try { hideGifPopup(elementToUpdate); } catch (e) {}
-        }
+        releaseKey(keyElement, normKey);
     });
     
     // 添加拨号按钮点击事件
@@ -2458,41 +2529,31 @@ function initDialer() {
     
     /**
      * 处理按键按下事件
+     * 执行顺序严格保证：JS 缩放先于 CSS 视觉变化，避免按下时"先缩小再放大"的跳跃
+     *
+     * 顺序：
+     *   1. 音效/波纹/GIF — 非阻塞的视觉/听觉反馈
+     *   2. 电话号码更新 — 文本输入逻辑（与视觉独立）
+     *   3. 🔴 TouchSizeController.applyOnPress — JS 缩放/图片 overlay 最先到位
+     *   4. key-pressed 类 + 颜色变化 — CSS 视觉跟随（此时 transform 已由 JS 锁定）
+     *   5. key-image-container 图片 — 旧图片系统（与模式5 overlay 独立）
+     *
      * @param {string} keyValue - 按键的值
      * @param {HTMLElement} keyElement - 按键元素
      */
-    function handleKeyPress(keyValue, keyElement, rippleX, rippleY) {
-        // 播放按键音效，传入按键值
+    function handleKeyPress(keyValue, keyElement) {
+        // ===== 第1步：非阻塞反馈（音效/波纹/GIF） =====
         playKeySound(keyValue);
-
-        // 模式6：鼠标/触摸按下同步 3D 按压效果（松手由 mouseup/touchend/touchcancel/keyup 统一移除）
-        if (keyElement) keyElement.classList.add('btn3d-pressed');
-
-        // 模式8：水波纹特效（若未传坐标则用按钮中心）
-        try {
-            if (rippleX === undefined || rippleY === undefined) {
-                const r = keyElement.getBoundingClientRect();
-                rippleX = keyElement.offsetWidth / 2;
-                rippleY = keyElement.offsetHeight / 2;
-            }
-            createRipple(keyElement, rippleX, rippleY);
-        } catch (e) {}
-
-        // 模式7：按下按钮弹出 GIF 动画（若已启用且已上传 GIF）
+        try { createRipple(keyElement); } catch (e) {}
         try { showGifPopup(keyElement); } catch (e) {}
 
-        // 保存当前颜色状态
+        // ===== 第2步：电话号码输入逻辑（与按钮视觉独立） =====
         const currentColor = numberDisplay.style.color;
-
-        // 移除15个字符的限制，允许输入任意长度
         phoneNumberValue += keyValue;
         updateDisplay();
-
-        // 恢复原来的颜色，但如果没有预设文本颜色，则保持默认黑色
         if (phoneNumberValue.length > keyValue.length) {
             numberDisplay.style.color = currentColor;
         } else {
-            // 如果是从头开始输入数字，应用从后台管理设置的样式
             applyNumberDisplayStyle();
         }
 
@@ -2500,42 +2561,24 @@ function initDialer() {
         if (window.dialerDataManager && window.dialerDataManager.getExtraTextFieldTypingMode()) {
             const extraTextField = document.getElementById('extraTextField');
             const extraTextFieldContent = window.dialerDataManager.getExtraTextFieldContent() || '';
-
-            // 确保extraTextFieldDisplayedLength全局变量存在
             if (typeof window.extraTextFieldDisplayedLength === 'undefined') {
                 window.extraTextFieldDisplayedLength = 0;
             }
-
-            // 如果还有未显示的字符，显示下一个字符
             if (window.extraTextFieldDisplayedLength < extraTextFieldContent.length) {
-                // 将字符串转换为数组以正确处理emoji
                 const textArray = Array.from(extraTextFieldContent);
-
-                // 获取下一个完整字符（正确处理emoji）
                 const nextCharacter = textArray[window.extraTextFieldDisplayedLength];
-
-                // 确保下一个字符存在
                 if (nextCharacter !== undefined) {
-                    // 更新显示内容
                     let newContent = extraTextField.textContent + nextCharacter;
                     window.extraTextFieldDisplayedLength++;
-
-                    // 使用数据管理器处理文本溢出效果
                     if (window.dialerDataManager && window.dialerDataManager.handleTextOverflow) {
                         newContent = window.dialerDataManager.handleTextOverflow(newContent);
                     } else {
-                        // 如果数据管理器不可用，使用默认的字数限制
                         if (newContent.length > 12) {
-                            // 保留后面的12个字符，前面显示省略号
                             newContent = '...' + newContent.substring(newContent.length - 9);
                         }
                     }
-
-                    // 更新文本内容
                     extraTextField.textContent = newContent;
                 }
-
-                // 应用样式设置
                 if (window.dialerDataManager && window.dialerDataManager.getExtraTextFieldStyle) {
                     const style = window.dialerDataManager.getExtraTextFieldStyle();
                     if (style) {
@@ -2549,65 +2592,49 @@ function initDialer() {
 
         // 处理额外文本块的按键逐个显示模式
         if (window.dialerDataManager && window.dialerDataManager.getExtraTextBlocksTypingMode()) {
-            const textPreviewArea = document.getElementById('textPreviewArea');
-            const extraTextBlocks = window.dialerDataManager.getExtraTextBlocks() || [];
-
-            // 确保extraTextBlocksDisplayedLength全局变量存在
             if (typeof window.extraTextBlocksDisplayedLength === 'undefined') {
                 window.extraTextBlocksDisplayedLength = 0;
             }
-
-            // 计算所有文本块的总字符数（使用Array.from确保正确处理emoji）
+            const extraTextBlocks = window.dialerDataManager.getExtraTextBlocks() || [];
             let totalCharacters = 0;
             for (let i = 0; i < extraTextBlocks.length; i++) {
                 if (extraTextBlocks[i].text) {
                     totalCharacters += Array.from(extraTextBlocks[i].text).length;
                 }
             }
-
-            // 如果还有未显示的字符，显示下一个字符
             if (window.extraTextBlocksDisplayedLength < totalCharacters) {
-                // 增加显示计数
                 window.extraTextBlocksDisplayedLength++;
-
-                // 显示到当前计数的所有字符
                 displayTextBlocksByTypingMode(window.extraTextBlocksDisplayedLength);
             }
         }
 
-        // 添加按键按下的视觉效果
+        // ===== 第3步：🔴 JS 缩放/图片 overlay 最先到位（关键！确保按下即放大） =====
+        if (keyElement) {
+            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnPress) {
+                TouchSizeController.applyOnPress(keyElement, keyValue);
+            }
+        }
+
+        // ===== 第4步：CSS 视觉变化（此时 JS transform 已锁定，CSS active 不会再干扰） =====
         if (keyElement) {
             keyElement.classList.add('key-pressed');
-            // 应用自定义按钮按下颜色
             keyElement.style.backgroundColor = keyPressedColor;
-            
-            // 应用数字按下颜色（直接修改键元素的文本颜色）
             keyElement.style.color = numberPressedColor;
-            
-            // 应用字母按下颜色
             const labelElement = keyElement.querySelector('.ios-key-label');
             if (labelElement) {
                 labelElement.style.color = letterPressedColor;
             }
-            
-            // 显示按钮图片（将透明度设置为不透明）
+
+            // 显示按钮图片（旧图片系统，与模式5的 char-image-overlay 独立）
             const imgContainer = keyElement.querySelector('.key-image-container');
             if (imgContainer) {
-                // 确保图片容器背景在按钮按下时仍然透明
                 imgContainer.style.backgroundColor = 'transparent';
                 const img = imgContainer.querySelector('img');
                 if (img) {
-                    // 设置按下动画时间
                     img.style.transition = 'opacity ' + (imagePressAnimationDuration / 1000) + 's ease';
-                    img.style.opacity = '1'; // 按下时变为不透明
-                    // 确保图片元素背景在按钮按下时仍然透明
+                    img.style.opacity = '1';
                     img.style.backgroundColor = 'transparent';
                 }
-            }
-
-            // 应用按下时的按钮大小变换（由后台「按钮触摸大小变换设置」控制）
-            if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnPress) {
-                TouchSizeController.applyOnPress(keyElement, keyValue);
             }
         }
     }
@@ -3144,6 +3171,49 @@ document.addEventListener('DOMContentLoaded', function() {
         initDialer();
         // 初始化音频配置
         initAudioConfig();
+
+        // 🔴 终极巡检：每 100ms 检查所有12个按钮是否有"卡住"的视觉效果
+        // 无论什么事件源（键盘/鼠标/触摸），只要松手后有残留效果，立即清除
+        setInterval(function() {
+            const allBtns = document.querySelectorAll('[data-key]');
+            allBtns.forEach(function(btn) {
+                const key = btn.getAttribute('data-key');
+                const isPressed = !!pressedKeys[key];
+                // 如果没有被按下，但 transform 不是默认值 → 强制还原
+                if (!isPressed) {
+                    const inlineTransform = btn.style.transform || btn.style.getPropertyValue('transform');
+                    if (inlineTransform && inlineTransform !== 'none' && !inlineTransform.includes('scale(1)') && inlineTransform !== '') {
+                        console.log('[WATCHDOG] 🐕 发现按钮卡住！key=' + key + ' transform=' + inlineTransform + ' → 强制还原');
+                        btn.style.setProperty('transform', 'scale(1)', 'important');
+                        btn.style.zIndex = '';
+                    }
+                    // 如果没有被按下，但残留了阴影 → 强制清除
+                    if (btn.style.boxShadow && btn.style.boxShadow !== 'none') {
+                        console.log('[WATCHDOG] 🐕 发现残留阴影！key=' + key + ' → 清除');
+                        btn.style.boxShadow = '';
+                    }
+                    // 如果没有被按下，但有 char-image-overlay → 强制清除
+                    const btnKey = btn.getAttribute('data-key');
+                    const outsideOverlays = document.querySelectorAll(`.char-image-overlay[data-for-btn="${btnKey}"]`);
+                    if (outsideOverlays.length > 0) {
+                        outsideOverlays.forEach(function(el) {
+                            if (el._removing) return;
+                            console.log('[WATCHDOG] 🐕 发现残留 outside overlay！key=' + key + ' → 清除');
+                            el._removing = true;
+                            el.style.opacity = '0';
+                            setTimeout(() => { if (el.parentNode) el.parentNode.removeChild(el); }, 250);
+                        });
+                    }
+                    const insideOverlay = btn.querySelector('.char-image-overlay');
+                    if (insideOverlay && !insideOverlay._removing) {
+                        console.log('[WATCHDOG] 🐕 发现残留 inside overlay！key=' + key + ' → 清除');
+                        insideOverlay._removing = true;
+                        insideOverlay.style.opacity = '0';
+                        setTimeout(() => { if (insideOverlay.parentNode) insideOverlay.parentNode.removeChild(insideOverlay); }, 250);
+                    }
+                }
+            });
+        }, 100);
         
         // 加载按钮1的文字
         if (window.dialerDataManager) {

@@ -1857,7 +1857,7 @@
             const CHAR_IMG_PARAMS_DEFAULT = {
                 fadeIn: 200,          // 图片淡入 ms
                 fadeOut: 200,         // 图片淡出 ms
-                btnDur: 180,          // 按钮放大过渡 ms
+                btnDur: 180,          // 按钮放大与缩小同步过渡 ms
                 objectFit: 'cover',   // cover=裁剪 | contain=不裁剪 | outside=按钮外完整
                 outsideFit: 'width',  // outside 模式下：'width'=宽=按钮直径 | 'height'=高=按钮直径
                 // 按钮放大阴影
@@ -1929,13 +1929,10 @@
             function updateImageParamsVisibility() {
                 const area = document.getElementById('charImageParamsArea');
                 if (!area) return;
-                const isBindOn = loadBindMode();
-                if (isBindOn) {
-                    area.classList.add('hidden');
-                } else {
-                    area.classList.remove('hidden');
-                    renderCharImgParamsUI();
-                }
+                // 🔴 修复：无论绑定模式开关如何，图片叠加参数面板都一直展示
+                // 之前绑定模式开启时会隐藏面板，但用户希望两种模式都能看到参数
+                area.classList.remove('hidden');
+                renderCharImgParamsUI();
             }
 
             // 初始化参数面板显隐 + 绑定输入事件
@@ -5701,9 +5698,9 @@
                             <span>图片高度=按钮直径</span>
                         </label>
                     </div>
-                    <!-- 按钮放大过渡时间 -->
+                    <!-- 按钮放大与缩小同步过渡时间 -->
                     <label class="flex items-center gap-2 text-xs text-gray-600">
-                        <span>按钮放大过渡</span>
+                        <span>按钮放大与缩小同步过渡</span>
                         <input id="charImgBtnDur" type="number" min="0" max="1000" step="50" value="180"
                             class="w-16 h-6 text-center text-[11px] font-mono border border-pink-300 rounded focus:border-pink-500 focus:outline-none">
                         <span class="text-[10px] text-gray-400">ms</span>
@@ -5844,7 +5841,7 @@
                     <input type="range" id="ripplePressDurationSlider" min="0" max="1000" step="10" value="150" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                     <input type="number" id="ripplePressDuration" min="0" max="1000" value="150" class="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-pink-500 text-center">
                 </div>
-                <p class="text-xs text-gray-500 mt-1">控制被按下按钮放大过渡的动画时长</p>
+                <p class="text-xs text-gray-500 mt-1">控制被按下按钮放大与缩小同步过渡的动画时长</p>
             </div>
 
             <!-- 最近圈按钮：缩小尺寸（距离=1的按钮） -->
@@ -5911,7 +5908,7 @@
                     <input type="range" id="othersShrinkPressDurationSlider" min="0" max="1000" step="10" value="150" class="flex-1 h-2 bg-gray-200 rounded-lg appearance-none cursor-pointer">
                     <input type="number" id="othersShrinkPressDuration" min="0" max="1000" value="150" class="w-20 px-3 py-2 border border-gray-300 rounded-lg focus:outline-none focus:ring-2 focus:ring-orange-500 text-center">
                 </div>
-                <p class="text-xs text-gray-500 mt-1">控制被按下按钮放大过渡的动画时长</p>
+                <p class="text-xs text-gray-500 mt-1">控制被按下按钮放大与缩小同步过渡的动画时长</p>
             </div>
 
             <!-- 其余按钮：缩小尺寸 -->
@@ -6214,7 +6211,13 @@
                 }
             }
         }
-        radios.forEach(r => r.addEventListener('change', applyModeVisibility));
+        radios.forEach(r => r.addEventListener('change', function () {
+            applyModeVisibility();
+            // 模式切换 → 立即保存（关键操作不防抖）
+            const selected = document.querySelector('input[name="touchSizeMode"]:checked');
+            const modeLabel = selected ? selected.closest('label').textContent.trim().split('：')[0] : '未知';
+            immediateSaveConfig(`已切换到「${modeLabel}」并自动保存`);
+        }));
 
         // ---------- 模式2表格：动态生成与操作 ----------
         /**
@@ -6341,6 +6344,7 @@
                     return;
                 }
                 appendSizeInput(container, 10);
+                autoSaveConfig(); // 增删尺寸 → 自动保存
             }
             if (removeBtn) {
                 const container = removeBtn.closest('.continuous-sizes');
@@ -6350,6 +6354,7 @@
                     return;
                 }
                 removeBtn.closest('.flex').remove();
+                autoSaveConfig(); // 增删尺寸 → 自动保存
             }
             // 涟漪配置展开/收起
             if (rippleToggleBtn) {
@@ -6370,6 +6375,7 @@
          */
         function setAllContinuousEnabled(enabled) {
             document.querySelectorAll('.continuous-enabled').forEach(cb => { cb.checked = enabled; });
+            autoSaveConfig(); // 批量开关 → 自动保存
         }
         /**
          * 将第一行的配置（启用状态、连续次数、尺寸列表）复制到其余 11 行
@@ -6418,6 +6424,7 @@
                     rippleRow.querySelector('.ripple-releaseDuration').value = firstRipple.releaseDuration;
                 }
             });
+            autoSaveConfig(); // 批量复制 → 自动保存
         }
         const applyAllBtn = document.getElementById('applyAllContinuousBtn');
         const disableAllBtn = document.getElementById('disableAllContinuousBtn');
@@ -6575,17 +6582,62 @@
         }
 
         // ---------- 保存/读取/重置 ----------
+        // 防抖自动保存定时器引用
+        let _autoSaveTimer = null;
+
         /**
-         * 保存当前 UI 配置到 localStorage
+         * 静默保存当前 UI 配置到 localStorage（内部使用，不弹窗）
+         * @returns {boolean} 是否保存成功
          */
-        function saveConfig() {
+        function _silentSaveConfig() {
             try {
                 const cfg = collectConfig();
                 localStorage.setItem(STORAGE_KEY, JSON.stringify(cfg));
-                alert('按钮触摸大小变换设置已保存成功，请刷新拨号键盘页面查看效果');
+                return true;
             } catch (e) {
                 console.error('保存按钮触摸大小变换设置失败:', e);
-                alert('保存失败: ' + e.message);
+                return false;
+            }
+        }
+
+        /**
+         * 防抖自动保存（300ms，合并快速连续变更）
+         * @param {string} [toastMsg] 可选的保存成功提示；传入则用 showNotification 轻提示
+         */
+        function autoSaveConfig(toastMsg) {
+            if (_autoSaveTimer) clearTimeout(_autoSaveTimer);
+            _autoSaveTimer = setTimeout(function () {
+                const ok = _silentSaveConfig();
+                if (ok && typeof showNotification === 'function') {
+                    showNotification(toastMsg || '按钮触摸变换设置已自动保存');
+                }
+            }, 300);
+        }
+
+        /**
+         * 立即保存（无防抖，用于模式切换等关键操作）
+         * @param {string} toastMsg 保存成功提示文本
+         */
+        function immediateSaveConfig(toastMsg) {
+            if (_autoSaveTimer) { clearTimeout(_autoSaveTimer); _autoSaveTimer = null; }
+            const ok = _silentSaveConfig();
+            if (ok && typeof showNotification === 'function') {
+                showNotification(toastMsg || '按钮触摸变换设置已自动保存');
+            }
+        }
+
+        /**
+         * 手动保存按钮的点击处理（立即保存 + 成功提示）
+         */
+        function saveConfig() {
+            if (_silentSaveConfig()) {
+                if (typeof showNotification === 'function') {
+                    showNotification('按钮触摸大小变换设置已保存');
+                } else {
+                    alert('按钮触摸大小变换设置已保存成功');
+                }
+            } else {
+                alert('保存失败，请检查控制台');
             }
         }
         /**
@@ -6612,7 +6664,11 @@
             try {
                 localStorage.removeItem(STORAGE_KEY);
                 applyConfig(DEFAULT_CONFIG);
-                alert('已重置为默认设置');
+                if (typeof showNotification === 'function') {
+                    showNotification('已重置为默认设置');
+                } else {
+                    alert('已重置为默认设置');
+                }
             } catch (e) {
                 alert('重置失败: ' + e.message);
             }
@@ -6620,6 +6676,18 @@
 
         document.getElementById('saveButtonTouchSizeBtn').addEventListener('click', saveConfig);
         document.getElementById('resetButtonTouchSizeBtn').addEventListener('click', resetConfig);
+
+        /**
+         * 给所有指定的元素绑定"变更即自动保存"监听
+         * @param {string} selector CSS 选择器（如 input, select）
+         * @param {string} [event='change'] 事件名（滑块用 input 即时保存，数字框用 change 失焦保存）
+         */
+        function bindAutoSave(selector, event) {
+            event = event || 'change';
+            document.querySelectorAll(selector).forEach(el => {
+                el.addEventListener(event, function () { autoSaveConfig(); });
+            });
+        }
 
         // ---------- 初始化 ----------
         // 绑定所有滑块对
@@ -6646,6 +6714,19 @@
         applyModeVisibility();
         // 读取已保存配置回显
         loadConfig();
+
+        // ---------- 自动保存绑定（模式1~5参数变更即时保存） ----------
+        // 滑块（实时变化即保存）— 非表格内的滑块直接绑定
+        bindAutoSave('input[type="range"]', 'input');
+        // 数字输入框（失焦/回车时保存）— 非表格内的数字框直接绑定
+        bindAutoSave('#pressEnlargeSettings input[type="number"], #continuousSettings input[type="number"], #othersShrinkSettings input[type="number"], #rippleSettings input[type="number"]', 'change');
+        // 模式2表格内的所有 input 用事件委托（因为 renderContinuousTable 会销毁重建 DOM）
+        tableBody.addEventListener('input', function (e) {
+            if (e.target.matches('input[type="number"], input[type="checkbox"]')) autoSaveConfig();
+        });
+        tableBody.addEventListener('change', function (e) {
+            if (e.target.matches('input[type="number"], input[type="checkbox"]')) autoSaveConfig();
+        });
         // 兜底：延迟渲染模式5（等 DOMContentLoaded 后 window.renderMode5Areas 才可用）
         (function tryRenderMode5(retries) {
             if (typeof window.renderMode5Areas === 'function') {

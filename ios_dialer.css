@@ -40,7 +40,7 @@
 
 /* iOS拨号键盘样式 */
 .ios-key {
-    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400;
     /* 防止移动端长按选中文字、弹出复制/搜索菜单 */
     -webkit-user-select: none;
     user-select: none;
@@ -53,7 +53,7 @@
 }
 
 .ios-key-zero {
-    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400;
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
@@ -61,7 +61,7 @@
 }
 
 .ios-key-delete {
-    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosHighlight font-ios font-medium text-2xl transition-all duration-150 active:bg-gray-400 active:scale-95;
+    @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosHighlight font-ios font-medium text-2xl transition-all duration-150 active:bg-gray-400;
     -webkit-user-select: none;
     user-select: none;
     -webkit-touch-callout: none;
@@ -72,8 +72,14 @@
     @apply w-full max-w-md mx-auto bg-iosGray min-h-screen flex flex-col items-center py-8 px-4;
 }
 
+/*
+ * .key-pressed 只做颜色切换，不再负责 scale 变换！
+ * 缩放由 TouchSizeController.applyOnPress/applyOnRelease 统一管理，
+ * CSS 驱动的 active:scale-95 和 .key-pressed scale-95 会与 JS 缩放冲突，
+ * 导致按下时先缩小再放大的跳跃闪烁。
+ */
 .key-pressed {
-    @apply scale-95 bg-gray-400;
+    @apply bg-gray-400;
 }
 
 /* 调试用样式：文本框背景设为黄色 */
