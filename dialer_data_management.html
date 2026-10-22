@@ -2357,18 +2357,26 @@
             };
             /**
              * 读取按钮文字配置
+             * 深合并：确保每个按钮的 normal/pressed/label 字段都有默认值
              * @returns {Object} 12个按钮的文字配置对象
              */
             function loadBtnTextConfig() {
+                const result = JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
                 try {
                     const raw = localStorage.getItem(BTN_TEXT_KEY);
                     if (raw) {
                         const parsed = JSON.parse(raw);
-                        // 合并默认值，确保每个键都存在
-                        return Object.assign({}, BTN_TEXT_DEFAULT, parsed);
+                        // 深合并：逐个 key 合并内部字段，确保 label 不会被旧数据覆盖为空
+                        Object.keys(result).forEach(function(k) {
+                            if (parsed[k]) {
+                                result[k].normal = parsed[k].normal !== undefined ? parsed[k].normal : result[k].normal;
+                                result[k].pressed = parsed[k].pressed !== undefined ? parsed[k].pressed : result[k].pressed;
+                                result[k].label = parsed[k].label !== undefined ? parsed[k].label : result[k].label;
+                            }
+                        });
                     }
                 } catch (e) {}
-                return JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
+                return result;
             }
             /**
              * 保存按钮文字配置

@@ -1660,17 +1660,25 @@ function initDialer() {
     };
     /**
      * 读取按钮文字配置
+     * 深合并：确保每个按钮的 normal/pressed/label 字段都有默认值
      * @returns {Object} 12个按钮的文字配置
      */
     function loadBtnTextConfig() {
+        const result = JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
         try {
             const raw = localStorage.getItem(BTN_TEXT_KEY);
             if (raw) {
                 const parsed = JSON.parse(raw);
-                return Object.assign({}, BTN_TEXT_DEFAULT, parsed);
+                Object.keys(result).forEach(function(k) {
+                    if (parsed[k]) {
+                        result[k].normal = parsed[k].normal !== undefined ? parsed[k].normal : result[k].normal;
+                        result[k].pressed = parsed[k].pressed !== undefined ? parsed[k].pressed : result[k].pressed;
+                        result[k].label = parsed[k].label !== undefined ? parsed[k].label : result[k].label;
+                    }
+                });
             }
         } catch (e) {}
-        return JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
+        return result;
     }
     /**
      * 将按钮文字配置应用到所有12个按钮
