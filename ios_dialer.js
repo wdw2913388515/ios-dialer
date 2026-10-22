@@ -1645,22 +1645,22 @@ function initDialer() {
     // ===== 模式10：自定义按钮文字 =====
     const BTN_TEXT_KEY = 'dialerBtnTextConfig';
     const BTN_TEXT_DEFAULT = {
-        '1': { normal: '1', pressed: '', label: '阿凸目' },
-        '2': { normal: '2', pressed: '', label: 'ABC' },
-        '3': { normal: '3', pressed: '', label: 'DEF' },
-        '4': { normal: '4', pressed: '', label: 'GHI' },
-        '5': { normal: '5', pressed: '', label: 'JKL' },
-        '6': { normal: '6', pressed: '', label: 'MNO' },
-        '7': { normal: '7', pressed: '', label: 'PQRS' },
-        '8': { normal: '8', pressed: '', label: 'TUV' },
-        '9': { normal: '9', pressed: '', label: 'WXYZ' },
-        '*': { normal: '*', pressed: '', label: '' },
-        '0': { normal: '0', pressed: '', label: '+' },
-        '#': { normal: '#', pressed: '', label: '' }
+        '1': { normal: '1', pressed: '', label: '阿凸目', labelPressed: '' },
+        '2': { normal: '2', pressed: '', label: 'ABC', labelPressed: '' },
+        '3': { normal: '3', pressed: '', label: 'DEF', labelPressed: '' },
+        '4': { normal: '4', pressed: '', label: 'GHI', labelPressed: '' },
+        '5': { normal: '5', pressed: '', label: 'JKL', labelPressed: '' },
+        '6': { normal: '6', pressed: '', label: 'MNO', labelPressed: '' },
+        '7': { normal: '7', pressed: '', label: 'PQRS', labelPressed: '' },
+        '8': { normal: '8', pressed: '', label: 'TUV', labelPressed: '' },
+        '9': { normal: '9', pressed: '', label: 'WXYZ', labelPressed: '' },
+        '*': { normal: '*', pressed: '', label: '', labelPressed: '' },
+        '0': { normal: '0', pressed: '', label: '+', labelPressed: '' },
+        '#': { normal: '#', pressed: '', label: '', labelPressed: '' }
     };
     /**
      * 读取按钮文字配置
-     * 深合并：确保每个按钮的 normal/pressed/label 字段都有默认值
+     * 深合并：确保每个按钮的 normal/pressed/label/labelPressed 字段都有默认值
      * @returns {Object} 12个按钮的文字配置
      */
     function loadBtnTextConfig() {
@@ -1674,6 +1674,7 @@ function initDialer() {
                         result[k].normal = parsed[k].normal !== undefined ? parsed[k].normal : result[k].normal;
                         result[k].pressed = parsed[k].pressed !== undefined ? parsed[k].pressed : result[k].pressed;
                         result[k].label = parsed[k].label !== undefined ? parsed[k].label : result[k].label;
+                        result[k].labelPressed = parsed[k].labelPressed !== undefined ? parsed[k].labelPressed : result[k].labelPressed;
                     }
                 });
             }
@@ -1716,7 +1717,7 @@ function initDialer() {
         });
     }
     /**
-     * 按下按钮时切换为按下文字
+     * 按下按钮时切换为按下文字（主文字 + 字母标签）
      * @param {HTMLElement} el - 按钮元素
      */
     function setPressedText(el) {
@@ -1725,16 +1726,22 @@ function initDialer() {
         const cfg = loadBtnTextConfig();
         const item = cfg[key];
         if (!item) return;
-        // 按下文字为空则不切换（与未按下相同）
-        if (!item.pressed) return;
-        const mainSpan = el.querySelector('.ios-key-main');
-        if (mainSpan) {
-            mainSpan.textContent = item.pressed;
-            adjustMainFontSize(mainSpan, item.pressed);
+        // 主文字按下切换
+        if (item.pressed) {
+            const mainSpan = el.querySelector('.ios-key-main');
+            if (mainSpan) {
+                mainSpan.textContent = item.pressed;
+                adjustMainFontSize(mainSpan, item.pressed);
+            }
+        }
+        // 字母标签按下切换
+        if (item.labelPressed && item.label) {
+            const labelEl = el.querySelector('.ios-key-label');
+            if (labelEl) labelEl.textContent = item.labelPressed;
         }
     }
     /**
-     * 松手时恢复默认文字
+     * 松手时恢复默认文字（主文字 + 字母标签）
      * @param {HTMLElement} el - 按钮元素
      */
     function setNormalText(el) {
@@ -1743,10 +1750,16 @@ function initDialer() {
         const cfg = loadBtnTextConfig();
         const item = cfg[key];
         if (!item) return;
+        // 主文字恢复
         const mainSpan = el.querySelector('.ios-key-main');
         if (mainSpan) {
             mainSpan.textContent = item.normal || key;
             adjustMainFontSize(mainSpan, item.normal || key);
+        }
+        // 字母标签恢复
+        const labelEl = el.querySelector('.ios-key-label');
+        if (labelEl && item.label) {
+            labelEl.textContent = item.label;
         }
     }
     /**

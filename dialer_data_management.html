@@ -2342,22 +2342,22 @@
             // ===== 模式10：自定义按钮文字 =====
             const BTN_TEXT_KEY = 'dialerBtnTextConfig';
             const BTN_TEXT_DEFAULT = {
-                '1': { normal: '1', pressed: '', label: '阿凸目' },
-                '2': { normal: '2', pressed: '', label: 'ABC' },
-                '3': { normal: '3', pressed: '', label: 'DEF' },
-                '4': { normal: '4', pressed: '', label: 'GHI' },
-                '5': { normal: '5', pressed: '', label: 'JKL' },
-                '6': { normal: '6', pressed: '', label: 'MNO' },
-                '7': { normal: '7', pressed: '', label: 'PQRS' },
-                '8': { normal: '8', pressed: '', label: 'TUV' },
-                '9': { normal: '9', pressed: '', label: 'WXYZ' },
-                '*': { normal: '*', pressed: '', label: '' },
-                '0': { normal: '0', pressed: '', label: '+' },
-                '#': { normal: '#', pressed: '', label: '' }
+                '1': { normal: '1', pressed: '', label: '阿凸目', labelPressed: '' },
+                '2': { normal: '2', pressed: '', label: 'ABC', labelPressed: '' },
+                '3': { normal: '3', pressed: '', label: 'DEF', labelPressed: '' },
+                '4': { normal: '4', pressed: '', label: 'GHI', labelPressed: '' },
+                '5': { normal: '5', pressed: '', label: 'JKL', labelPressed: '' },
+                '6': { normal: '6', pressed: '', label: 'MNO', labelPressed: '' },
+                '7': { normal: '7', pressed: '', label: 'PQRS', labelPressed: '' },
+                '8': { normal: '8', pressed: '', label: 'TUV', labelPressed: '' },
+                '9': { normal: '9', pressed: '', label: 'WXYZ', labelPressed: '' },
+                '*': { normal: '*', pressed: '', label: '', labelPressed: '' },
+                '0': { normal: '0', pressed: '', label: '+', labelPressed: '' },
+                '#': { normal: '#', pressed: '', label: '', labelPressed: '' }
             };
             /**
              * 读取按钮文字配置
-             * 深合并：确保每个按钮的 normal/pressed/label 字段都有默认值
+             * 深合并：确保每个按钮的 normal/pressed/label/labelPressed 字段都有默认值
              * @returns {Object} 12个按钮的文字配置对象
              */
             function loadBtnTextConfig() {
@@ -2366,12 +2366,12 @@
                     const raw = localStorage.getItem(BTN_TEXT_KEY);
                     if (raw) {
                         const parsed = JSON.parse(raw);
-                        // 深合并：逐个 key 合并内部字段，确保 label 不会被旧数据覆盖为空
                         Object.keys(result).forEach(function(k) {
                             if (parsed[k]) {
                                 result[k].normal = parsed[k].normal !== undefined ? parsed[k].normal : result[k].normal;
                                 result[k].pressed = parsed[k].pressed !== undefined ? parsed[k].pressed : result[k].pressed;
                                 result[k].label = parsed[k].label !== undefined ? parsed[k].label : result[k].label;
+                                result[k].labelPressed = parsed[k].labelPressed !== undefined ? parsed[k].labelPressed : result[k].labelPressed;
                             }
                         });
                     }
@@ -2394,7 +2394,7 @@
                 const cfg = loadBtnTextConfig();
                 const keys = ['1','2','3','4','5','6','7','8','9','*','0','#'];
                 grid.innerHTML = keys.map(function(k) {
-                    const item = cfg[k] || { normal: k, pressed: '', label: '' };
+                    const item = cfg[k] || { normal: k, pressed: '', label: '', labelPressed: '' };
                     return '<div class="border border-gray-200 rounded-md p-2 bg-gray-50">' +
                         '<div class="text-xs font-bold text-gray-600 mb-1 text-center">键 ' + k + '</div>' +
                         '<div class="mb-1">' +
@@ -2405,9 +2405,13 @@
                             '<label class="block text-[10px] text-gray-400 mb-0.5">主文字(按下时)</label>' +
                             '<input type="text" data-btn-key="' + k + '" data-btn-state="pressed" value="' + (item.pressed || '') + '" maxlength="8" placeholder="同未按下" class="w-full px-1.5 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-cyan-400 text-center">' +
                         '</div>' +
-                        '<div>' +
-                            '<label class="block text-[10px] text-gray-400 mb-0.5">字母标签</label>' +
+                        '<div class="mb-1">' +
+                            '<label class="block text-[10px] text-gray-400 mb-0.5">字母标签(未按下)</label>' +
                             '<input type="text" data-btn-key="' + k + '" data-btn-state="label" value="' + (item.label || '') + '" maxlength="12" placeholder="ABC" class="w-full px-1.5 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-cyan-400 text-center">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label class="block text-[10px] text-gray-400 mb-0.5">字母标签(按下时)</label>' +
+                            '<input type="text" data-btn-key="' + k + '" data-btn-state="labelPressed" value="' + (item.labelPressed || '') + '" maxlength="12" placeholder="同未按下" class="w-full px-1.5 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-cyan-400 text-center">' +
                         '</div>' +
                     '</div>';
                 }).join('');
@@ -7250,7 +7254,7 @@
     <div class="mt-6 p-4 border border-gray-200 rounded-lg bg-white">
         <h3 class="text-base font-semibold mb-1">模式10：自定义按钮文字</h3>
         <p class="text-xs text-gray-500 mb-3">
-            自定义12个按钮的主文字内容和字母标签（支持 emoji），以及按下后的主文字内容。按下文字留空则默认与未按下相同。字母标签留空则隐藏。
+            自定义12个按钮的主文字和字母标签（支持 emoji），每个都可独立设置未按下/按下时两种状态。按下留空=同未按下，字母标签留空=隐藏。
         </p>
         <div id="btnTextGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
             <!-- JS 动态生成 -->
