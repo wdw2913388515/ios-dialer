@@ -382,7 +382,14 @@ const TouchSizeController = (function () {
     function applyOnPress(keyElement, keyValue) {
         if (!keyElement) return;
         const mode = getMode();
-        if (mode === 'disabled') return;
+        // 模式11：只开了按下缩小（模式1-5全关），也要应用缩小效果
+        const pressShrink = (function() { try { return localStorage.getItem('dialerPressShrink') === 'true'; } catch(e) { return false; } })();
+        if (mode === 'disabled') {
+            if (pressShrink) {
+                applyTransform(keyElement, 1, 0); // scale=1 但会被 applyTransform 内部乘 0.95
+            }
+            return;
+        }
 
         if (mode === 'pressEnlarge') {
             // 模式1：按下放大、松手恢复
@@ -634,7 +641,15 @@ const TouchSizeController = (function () {
             + ' | inlineTransform=' + JSON.stringify(keyElement.style.transform)
             + ' | btn3d-pressed=' + keyElement.classList.contains('btn3d-pressed')
             + ' | lockedElMatch=' + (charSelectState.lockedEl === keyElement));
-        if (mode === 'disabled') return;
+        if (mode === 'disabled') {
+            // 模式11：只开了按下缩小，松手也要还原
+            try {
+                if (localStorage.getItem('dialerPressShrink') === 'true') {
+                    applyTransform(keyElement, 1, 180); // 180ms 过渡还原
+                }
+            } catch(e) {}
+            return;
+        }
 
         if (mode === 'pressEnlarge') {
             const cfg = getPressEnlargeConfig();
@@ -733,9 +748,17 @@ const TouchSizeController = (function () {
         el.style.transition = durationMs > 0
             ? `transform ${durationMs}ms ease, z-index 0s`
             : 'none';
+        // 模式11：按下缩小效果叠加
+        // 如果开关开启，scale 乘以 0.95（缩小5%），与模式1-5的放大叠加
+        let finalScale = scale;
+        try {
+            if (localStorage.getItem('dialerPressShrink') === 'true') {
+                finalScale = scale * 0.95;
+            }
+        } catch (e) {}
         // 🔑 关键：用 setProperty + 'important' 覆盖 3D 按钮样式的 !important transform
         // 这样 candy/keyboard 的 btn3d-pressed translateY 就不会干扰 JS 设定的 scale
-        el.style.setProperty('transform', `scale(${scale})`, 'important');
+        el.style.setProperty('transform', `scale(${finalScale})`, 'important');
         el.style.setProperty('transform-origin', 'center center', 'important');
         if (scale > 1) {
             el.style.zIndex = '50';
@@ -743,8 +766,8 @@ const TouchSizeController = (function () {
             el.style.zIndex = '';
         }
         // ===== 同步更新 outside 图片 overlay（让它跟按钮同步过渡）=====
-        syncOutsideOverlay(el, scale, durationMs);
-        console.log('[applyTransform] scale=' + scale + ' inlineTransform=' + JSON.stringify(el.style.transform));
+        syncOutsideOverlay(el, finalScale, durationMs);
+        console.log('[applyTransform] scale=' + scale + ' shrink=' + (finalScale !== scale) + ' finalScale=' + finalScale + ' inlineTransform=' + JSON.stringify(el.style.transform));
     }
 
     /**
