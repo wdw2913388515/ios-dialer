@@ -116,17 +116,24 @@
                 content-visibility: auto;
             }
             .phone-number-container {
-                @apply w-full overflow-hidden flex justify-end py-0 -mx-4 px-4; /* 禁用自动滑动，改为overflow-hidden */
-                scrollbar-width: none; /* Firefox */
-                -ms-overflow-style: none; /* IE and Edge */
-                margin-top: 0.25rem; /* 减少元素间间距 */
+                @apply w-full flex justify-end py-0 -mx-4 px-4;
+                /* 允许换行但隐藏横向溢出 */
+                overflow-x: hidden;
+                overflow-y: visible;
+                scrollbar-width: none;
+                -ms-overflow-style: none;
+                margin-top: 0.25rem;
                 margin-bottom: 0.25rem;
             }
             .phone-number-container::-webkit-scrollbar {
-                display: none; /* Chrome, Safari and Opera */
+                display: none;
             }
             .phone-number-content {
-                @apply whitespace-nowrap text-4xl font-ios text-center min-w-full text-iosGreen;
+                @apply whitespace-normal text-4xl font-ios text-center text-iosGreen;
+                max-width: 100%;
+                /* 让内容自然收缩，不再强制撑满 */
+                display: inline-block;
+                text-align: right; /* 右对齐，最新数字在右侧 */
             }
         }
     </style>

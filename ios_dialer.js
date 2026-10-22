@@ -3139,163 +3139,134 @@ function initDialer() {
     
     /**
      * 更新电话号码显示
-     * 根据是否有号码输入，控制号码和"添加号码"文字的显示状态
-     * 实现自动换行和字体大小调整，并在文本过长时添加省略号
-     * 支持逐个数字的颜色循环显示
+     * 根据容器宽度动态计算字体大小，确保数字不溢出
+     * 核心策略：先设最大字体 → 测量实际宽度 → 循环缩小直到 fit
      */
     function updateDisplay() {
-        // 获取容器和显示元素
         const containerWidth = phoneNumberContainer.clientWidth;
-        
-        // 计算需要显示的文本
         let displayText = phoneNumberValue || ' ';
         let displayWithEllipsis = displayText;
-        let fontSize = 36; // 初始字体大小（与text-4xl保持一致）
-        
-        // 创建临时元素用于测量文本宽度
-        let tempSpan = document.createElement('span');
-        tempSpan.style.visibility = 'hidden';
-        tempSpan.style.position = 'absolute';
-        tempSpan.style.whiteSpace = 'nowrap'; // 不换行以准确测量单行宽度
-        tempSpan.style.fontFamily = '-apple-system, BlinkMacSystemFont, Segoe UI, Roboto, Helvetica Neue, Arial, sans-serif';
-        document.body.appendChild(tempSpan);
-        
-        // 如果有电话号码
+        let fontSize = 36;
+
         if (phoneNumberValue) {
-            // 基于字数调整字体大小：第16个字时开始变小
-            if (phoneNumberValue.length >= 16) {
-                // 计算字体大小：只在16-19个字之间减小字体，20个字及以上保持字体不变
-                const adjustedLength = Math.min(phoneNumberValue.length, 20);
-                fontSize = Math.max(36 - (adjustedLength - 15) * 2, 16);
-            }
-            
-            // 设置字体大小
-            tempSpan.style.fontSize = fontSize + 'px';
-            
-            // 实现20个字时最左边显示省略号的效果
+            // 超过20个字 → 前面加省略号（保留后17位）
             if (phoneNumberValue.length > 20) {
-                // 保留后面的字符，前面显示省略号
                 displayWithEllipsis = '...' + phoneNumberValue.substring(phoneNumberValue.length - 17);
-            } else {
-                displayWithEllipsis = phoneNumberValue;
             }
+
+            // ===== 动态字体大小：测量 → 循环缩小直到 fit =====
+            // 先把字体设成最大，然后在内存里测量，不产生布局抖动
+            let tempSpan = document.createElement('span');
+            tempSpan.style.visibility = 'hidden';
+            tempSpan.style.position = 'absolute';
+            tempSpan.style.whiteSpace = 'nowrap';
+            tempSpan.style.fontFamily = numberDisplay.style.fontFamily || 'Inter, -apple-system, sans-serif';
+            tempSpan.style.fontWeight = '500';
+            tempSpan.textContent = displayWithEllipsis;
+            document.body.appendChild(tempSpan);
+
+            // 从最大字体开始，逐步缩小直到 fit 容器
+            let maxFont = 48;   // 最大字体
+            let minFont = 14;   // 最小字体
+            let currentFont = maxFont;
+            tempSpan.style.fontSize = currentFont + 'px';
+            // 循环缩小直到不溢出
+            while (tempSpan.scrollWidth > containerWidth && currentFont > minFont) {
+                currentFont -= 1;
+                tempSpan.style.fontSize = currentFont + 'px';
+            }
+            // 循环放大（如果还有空间）
+            while (tempSpan.scrollWidth <= containerWidth && currentFont < maxFont) {
+                currentFont += 1;
+                tempSpan.style.fontSize = currentFont + 'px';
+            }
+            // 最后一次可能超出，缩回去
+            if (tempSpan.scrollWidth > containerWidth) {
+                currentFont -= 1;
+            }
+            fontSize = Math.max(currentFont, minFont);
+
+            document.body.removeChild(tempSpan);
+        } else {
+            // 无号码时恢复默认
+            fontSize = 36;
         }
-        
-        // 清理临时元素
-        document.body.removeChild(tempSpan);
-        
-        // 设置字体大小
+
+        // 应用字体大小
         numberDisplay.style.fontSize = fontSize + 'px';
-        numberDisplay.style.whiteSpace = 'normal'; // 支持换行
-        
+        numberDisplay.style.whiteSpace = 'normal'; // 允许换行
+
         // 尝试使用数字颜色序列
         let useNumberColorSequence = false;
         let numberColorSequence = [];
-        
-        // 检查是否有dialerDataManager并且可以获取数字颜色序列
+
         if (window.dialerDataManager && window.dialerDataManager.getNumberColorSequence) {
             const sequence = window.dialerDataManager.getNumberColorSequence();
             if (sequence && sequence.length > 0) {
                 useNumberColorSequence = true;
-                // 按数字标识排序，确保顺序正确
                 numberColorSequence = sequence.sort((a, b) => a.number - b.number);
             }
         }
-        
-        // 如果有电话号码且可以使用颜色序列，逐个设置数字颜色
+
         if (phoneNumberValue && useNumberColorSequence) {
-            // 处理省略号情况
             let prefix = '';
             let numberToDisplay = displayWithEllipsis;
-            
+
             if (displayWithEllipsis.startsWith('...')) {
                 prefix = '...';
                 numberToDisplay = displayWithEllipsis.substring(3);
             }
-            
-            // 获取数字颜色序列整体透明度
+
             let sequenceOpacity = 1.0;
             if (window.dialerDataManager && window.dialerDataManager.getNumberColorSequenceOpacity) {
                 sequenceOpacity = window.dialerDataManager.getNumberColorSequenceOpacity();
             }
-            
-            // 构建带有颜色的HTML
+
             let coloredHtml = prefix;
             for (let i = 0; i < numberToDisplay.length; i++) {
-                // 计算应该使用的颜色索引，实现循环
                 const colorIndex = i % numberColorSequence.length;
                 const color = numberColorSequence[colorIndex].color;
-                
-                // 为每个数字创建带颜色和透明度的span
                 coloredHtml += `<span style="color: ${color}; opacity: ${sequenceOpacity};">${numberToDisplay[i]}</span>`;
             }
-            
-            // 设置为HTML内容
             numberDisplay.innerHTML = coloredHtml;
         } else {
-            // 正常显示文本并应用样式
             numberDisplay.textContent = displayWithEllipsis;
-            // 应用从后台管理设置的字体颜色和透明度样式
             applyNumberDisplayStyle();
         }
-        
-        // 控制占位符的显示状态
+
         if (phoneNumberValue) {
-            numberPlaceholder.style.display = 'none'; // 有号码时隐藏占位符
+            numberPlaceholder.style.display = 'none';
         } else {
-            numberPlaceholder.style.display = 'block'; // 无号码时显示占位符
-            numberDisplay.style.fontSize = '36px'; // 恢复默认字体大小（与text-4xl保持一致）
-            applyNumberDisplayStyle(); // 应用从后台管理设置的样式
+            numberPlaceholder.style.display = 'block';
+            numberDisplay.style.fontSize = '36px';
+            applyNumberDisplayStyle();
         }
-        
-        // 控制"添加号码"文字的显示状态
+
         if (phoneNumberValue) {
-            // 有号码输入时，先添加visible类
             addNumberText.classList.add('visible');
-            // 应用从后台管理设置的文字内容
             if (window.dialerDataManager && window.dialerDataManager.getAddNumberText) {
                 const text = window.dialerDataManager.getAddNumberText();
-                if (text) {
-                    addNumberText.textContent = text;
-                }
+                if (text) addNumberText.textContent = text;
             }
-            // 应用从后台管理设置的文字颜色
             if (window.dialerDataManager && window.dialerDataManager.getAddNumberTextColor) {
                 const color = window.dialerDataManager.getAddNumberTextColor();
-                if (color) {
-                    addNumberText.style.color = color;
-                }
+                if (color) addNumberText.style.color = color;
             }
-            // 应用从后台管理设置的可见性（透明度）
             if (window.dialerDataManager && window.dialerDataManager.getAddNumberTextVisible) {
-                const visible = window.dialerDataManager.getAddNumberTextVisible();
-                // 设置透明度：1为完全显示，0为完全透明
-                addNumberText.style.opacity = visible ? '1' : '0';
+                addNumberText.style.opacity = window.dialerDataManager.getAddNumberTextVisible() ? '1' : '0';
             }
-            // 应用从后台管理设置的字体大小
             if (window.dialerDataManager && window.dialerDataManager.getAddNumberTextFontSize) {
-                const fontSize = window.dialerDataManager.getAddNumberTextFontSize();
-                if (fontSize) {
-                    addNumberText.style.fontSize = fontSize + 'px';
-                }
+                const size = window.dialerDataManager.getAddNumberTextFontSize();
+                if (size) addNumberText.style.fontSize = size + 'px';
             }
-            // 应用从后台管理设置的垂直位置
             if (window.dialerDataManager && window.dialerDataManager.getAddNumberTextVerticalPosition) {
-                const position = window.dialerDataManager.getAddNumberTextVerticalPosition();
-                if (position) {
-                    // 使用margin-top控制垂直位置
-                    addNumberText.style.marginTop = position + 'px';
-                }
+                const pos = window.dialerDataManager.getAddNumberTextVerticalPosition();
+                if (pos) addNumberText.style.marginTop = pos + 'px';
             }
         } else {
-            // 没有号码输入时，隐藏"添加号码"文字
             addNumberText.classList.remove('visible');
-            // 保持已设置的颜色，只通过透明度控制隐藏
             addNumberText.style.opacity = '0';
-            // 不需要清除color样式，保持用户设置的颜色
         }
-        
-        // 不需要自动滚动，让文本自然换行显示
     }
     
     /**
