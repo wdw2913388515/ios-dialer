@@ -382,12 +382,10 @@ const TouchSizeController = (function () {
     function applyOnPress(keyElement, keyValue) {
         if (!keyElement) return;
         const mode = getMode();
-        // 模式11：只开了按下缩小（模式1-5全关），也要应用缩小效果
-        const pressShrink = (function() { try { return localStorage.getItem('dialerPressShrink') === 'true'; } catch(e) { return false; } })();
+        // 即使没有开启模式1~5，也要有基础的按下缩小反馈（0.95）
+        // 之前移除了 CSS active:scale-95 和 .key-pressed scale-95，但没给 disabled 模式加 fallback
         if (mode === 'disabled') {
-            if (pressShrink) {
-                applyTransform(keyElement, 1, 0); // scale=1 但会被 applyTransform 内部乘 0.95
-            }
+            applyTransform(keyElement, 0.95, 0);
             return;
         }
 
@@ -642,12 +640,8 @@ const TouchSizeController = (function () {
             + ' | btn3d-pressed=' + keyElement.classList.contains('btn3d-pressed')
             + ' | lockedElMatch=' + (charSelectState.lockedEl === keyElement));
         if (mode === 'disabled') {
-            // 模式11：只开了按下缩小，松手也要还原
-            try {
-                if (localStorage.getItem('dialerPressShrink') === 'true') {
-                    applyTransform(keyElement, 1, 180); // 180ms 过渡还原
-                }
-            } catch(e) {}
+            // disabled 模式也要还原 transform（对应 applyOnPress 的 0.95 缩小）
+            applyTransform(keyElement, 1, 0);
             return;
         }
 
@@ -748,17 +742,9 @@ const TouchSizeController = (function () {
         el.style.transition = durationMs > 0
             ? `transform ${durationMs}ms ease, z-index 0s`
             : 'none';
-        // 模式11：按下缩小效果叠加
-        // 如果开关开启，scale 乘以 0.95（缩小5%），与模式1-5的放大叠加
-        let finalScale = scale;
-        try {
-            if (localStorage.getItem('dialerPressShrink') === 'true') {
-                finalScale = scale * 0.95;
-            }
-        } catch (e) {}
         // 🔑 关键：用 setProperty + 'important' 覆盖 3D 按钮样式的 !important transform
         // 这样 candy/keyboard 的 btn3d-pressed translateY 就不会干扰 JS 设定的 scale
-        el.style.setProperty('transform', `scale(${finalScale})`, 'important');
+        el.style.setProperty('transform', `scale(${scale})`, 'important');
         el.style.setProperty('transform-origin', 'center center', 'important');
         if (scale > 1) {
             el.style.zIndex = '50';
@@ -766,8 +752,8 @@ const TouchSizeController = (function () {
             el.style.zIndex = '';
         }
         // ===== 同步更新 outside 图片 overlay（让它跟按钮同步过渡）=====
-        syncOutsideOverlay(el, finalScale, durationMs);
-        console.log('[applyTransform] scale=' + scale + ' shrink=' + (finalScale !== scale) + ' finalScale=' + finalScale + ' inlineTransform=' + JSON.stringify(el.style.transform));
+        syncOutsideOverlay(el, scale, durationMs);
+        console.log('[applyTransform] scale=' + scale + ' inlineTransform=' + JSON.stringify(el.style.transform));
     }
 
     /**
@@ -1811,29 +1797,6 @@ function initDialer() {
     }
     // 页面加载时应用按钮文字
     applyBtnTextConfig();
-    // ===== 模式11：按下缩小效果开关 =====
-    const PRESS_SHRINK_KEY = 'dialerPressShrink';
-    /**
-     * 应用按下缩小开关到 body 类名
-     * 后台开启时 body 加 .enable-press-shrink，CSS 自动激活 scale(0.95)
-     */
-    function applyPressShrinkSwitch() {
-        const enabled = localStorage.getItem(PRESS_SHRINK_KEY) === 'true';
-        if (enabled) {
-            document.body.classList.add('enable-press-shrink');
-        } else {
-            document.body.classList.remove('enable-press-shrink');
-        }
-    }
-    applyPressShrinkSwitch();
-    // 监听 storage 事件实时更新（后台改完开关立即生效）
-    window.addEventListener('storage', function() {
-        applyPressShrinkSwitch();
-    });
-    // 监听自定义 storage 事件（后台页面 dispatchEvent）
-    window.addEventListener('storage', function() {
-        applyPressShrinkSwitch();
-    });
     // 监听 storage 事件实时更新
     window.addEventListener('storage', function(e) {
         if (e.key === BTN_TEXT_KEY || !e.key) {
@@ -2828,18 +2791,9 @@ function initDialer() {
 
         // ===== 第3步：🔴 JS 缩放/图片 overlay 最先到位（关键！确保按下即放大） =====
         if (keyElement) {
-            // 模式11诊断
-            try {
-                const ps = localStorage.getItem('dialerPressShrink') === 'true';
-                console.log('[handleKeyPress] 📐 mode11.pressShrink=' + ps + ' mode=' + (typeof getMode === 'function' ? getMode() : 'unknown'));
-            } catch(e) {}
             if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnPress) {
                 TouchSizeController.applyOnPress(keyElement, keyValue);
             }
-            // 诊断：applyOnPress 后 transform 是什么
-            try {
-                console.log('[handleKeyPress] 📐 AFTER applyOnPress transform=' + JSON.stringify(keyElement.style.transform));
-            } catch(e) {}
         }
 
         // ===== 第4步：CSS 视觉变化（此时 JS transform 已锁定，CSS active 不会再干扰） =====
@@ -3405,18 +3359,13 @@ document.addEventListener('DOMContentLoaded', function() {
         // 无论什么事件源（键盘/鼠标/触摸），只要松手后有残留效果，立即清除
         setInterval(function() {
             const allBtns = document.querySelectorAll('[data-key]');
-            // 模式11：是否开启了按下缩小
-            let pressShrinkOn = false;
-            try { pressShrinkOn = localStorage.getItem('dialerPressShrink') === 'true'; } catch(e) {}
             allBtns.forEach(function(btn) {
                 const key = btn.getAttribute('data-key');
                 const isPressed = !!pressedKeys[key];
                 // 如果没有被按下，但 transform 不是默认值 → 强制还原
                 if (!isPressed) {
                     const inlineTransform = btn.style.transform || btn.style.getPropertyValue('transform');
-                    // 模式11：允许 scale(0.95) 存在（按下缩小可能在过渡中）
-                    const isScale1 = !inlineTransform || inlineTransform === 'none' || inlineTransform.includes('scale(1)') || inlineTransform === '';
-                    if (!isScale1) {
+                    if (inlineTransform && inlineTransform !== 'none' && !inlineTransform.includes('scale(1)') && inlineTransform !== '') {
                         console.log('[WATCHDOG] 🐕 发现按钮卡住！key=' + key + ' transform=' + inlineTransform + ' → 强制还原');
                         btn.style.setProperty('transform', 'scale(1)', 'important');
                         btn.style.zIndex = '';
