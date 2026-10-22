@@ -379,13 +379,36 @@ const TouchSizeController = (function () {
      * @param {HTMLElement} keyElement 按钮元素
      * @param {string} keyValue 按钮键值
      */
+    /**
+     * 读取模式11：基础按下缩放配置
+     * 当模式1-5都关闭时，模式11作为兜底按下反馈
+     * @returns {Object} { enabled, scale, pressDuration, releaseDuration }
+     */
+    function getBasePressScaleConfig() {
+        try {
+            const raw = localStorage.getItem('dialerBasePressScale');
+            if (raw) {
+                const p = JSON.parse(raw);
+                return {
+                    enabled: p.enabled !== false,  // 默认开启
+                    scale: p.scale || 0.95,          // 默认缩小到 95%
+                    pressDuration: p.pressDuration !== undefined ? p.pressDuration : 100,
+                    releaseDuration: p.releaseDuration !== undefined ? p.releaseDuration : 150
+                };
+            }
+        } catch (e) {}
+        return { enabled: true, scale: 0.95, pressDuration: 100, releaseDuration: 150 };
+    }
+
     function applyOnPress(keyElement, keyValue) {
         if (!keyElement) return;
         const mode = getMode();
-        // 即使没有开启模式1~5，也要有基础的按下缩小反馈（0.95）
-        // 之前移除了 CSS active:scale-95 和 .key-pressed scale-95，但没给 disabled 模式加 fallback
         if (mode === 'disabled') {
-            applyTransform(keyElement, 0.95, 0);
+            // 模式1-5都关闭 → 检查模式11：基础按下缩放
+            const baseCfg = getBasePressScaleConfig();
+            if (baseCfg.enabled && baseCfg.scale !== 1) {
+                applyTransform(keyElement, baseCfg.scale, baseCfg.pressDuration);
+            }
             return;
         }
 
@@ -640,8 +663,11 @@ const TouchSizeController = (function () {
             + ' | btn3d-pressed=' + keyElement.classList.contains('btn3d-pressed')
             + ' | lockedElMatch=' + (charSelectState.lockedEl === keyElement));
         if (mode === 'disabled') {
-            // disabled 模式也要还原 transform（对应 applyOnPress 的 0.95 缩小）
-            applyTransform(keyElement, 1, 0);
+            // 模式1-5都关闭 → 模式11恢复 scale(1)
+            const baseCfg = getBasePressScaleConfig();
+            if (baseCfg.enabled && baseCfg.scale !== 1) {
+                applyTransform(keyElement, 1, baseCfg.releaseDuration);
+            }
             return;
         }
 
