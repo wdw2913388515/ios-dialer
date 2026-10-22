@@ -2828,9 +2828,18 @@ function initDialer() {
 
         // ===== 第3步：🔴 JS 缩放/图片 overlay 最先到位（关键！确保按下即放大） =====
         if (keyElement) {
+            // 模式11诊断
+            try {
+                const ps = localStorage.getItem('dialerPressShrink') === 'true';
+                console.log('[handleKeyPress] 📐 mode11.pressShrink=' + ps + ' mode=' + (typeof getMode === 'function' ? getMode() : 'unknown'));
+            } catch(e) {}
             if (typeof TouchSizeController !== 'undefined' && TouchSizeController.applyOnPress) {
                 TouchSizeController.applyOnPress(keyElement, keyValue);
             }
+            // 诊断：applyOnPress 后 transform 是什么
+            try {
+                console.log('[handleKeyPress] 📐 AFTER applyOnPress transform=' + JSON.stringify(keyElement.style.transform));
+            } catch(e) {}
         }
 
         // ===== 第4步：CSS 视觉变化（此时 JS transform 已锁定，CSS active 不会再干扰） =====
@@ -3396,13 +3405,18 @@ document.addEventListener('DOMContentLoaded', function() {
         // 无论什么事件源（键盘/鼠标/触摸），只要松手后有残留效果，立即清除
         setInterval(function() {
             const allBtns = document.querySelectorAll('[data-key]');
+            // 模式11：是否开启了按下缩小
+            let pressShrinkOn = false;
+            try { pressShrinkOn = localStorage.getItem('dialerPressShrink') === 'true'; } catch(e) {}
             allBtns.forEach(function(btn) {
                 const key = btn.getAttribute('data-key');
                 const isPressed = !!pressedKeys[key];
                 // 如果没有被按下，但 transform 不是默认值 → 强制还原
                 if (!isPressed) {
                     const inlineTransform = btn.style.transform || btn.style.getPropertyValue('transform');
-                    if (inlineTransform && inlineTransform !== 'none' && !inlineTransform.includes('scale(1)') && inlineTransform !== '') {
+                    // 模式11：允许 scale(0.95) 存在（按下缩小可能在过渡中）
+                    const isScale1 = !inlineTransform || inlineTransform === 'none' || inlineTransform.includes('scale(1)') || inlineTransform === '';
+                    if (!isScale1) {
                         console.log('[WATCHDOG] 🐕 发现按钮卡住！key=' + key + ' transform=' + inlineTransform + ' → 强制还原');
                         btn.style.setProperty('transform', 'scale(1)', 'important');
                         btn.style.zIndex = '';
