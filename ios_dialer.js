@@ -1642,6 +1642,117 @@ function initDialer() {
         return rawKey;
     }
 
+    // ===== 模式10：自定义按钮文字 =====
+    const BTN_TEXT_KEY = 'dialerBtnTextConfig';
+    const BTN_TEXT_DEFAULT = {
+        '1': { normal: '1', pressed: '' }, '2': { normal: '2', pressed: '' },
+        '3': { normal: '3', pressed: '' }, '4': { normal: '4', pressed: '' },
+        '5': { normal: '5', pressed: '' }, '6': { normal: '6', pressed: '' },
+        '7': { normal: '7', pressed: '' }, '8': { normal: '8', pressed: '' },
+        '9': { normal: '9', pressed: '' }, '*': { normal: '*', pressed: '' },
+        '0': { normal: '0', pressed: '' }, '#': { normal: '#', pressed: '' }
+    };
+    /**
+     * 读取按钮文字配置
+     * @returns {Object} 12个按钮的文字配置
+     */
+    function loadBtnTextConfig() {
+        try {
+            const raw = localStorage.getItem(BTN_TEXT_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                return Object.assign({}, BTN_TEXT_DEFAULT, parsed);
+            }
+        } catch (e) {}
+        return JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
+    }
+    /**
+     * 将按钮文字配置应用到所有12个按钮
+     * 初始化和 storage 事件时调用
+     */
+    function applyBtnTextConfig() {
+        const cfg = loadBtnTextConfig();
+        keyElements.forEach(function(el) {
+            const key = el.getAttribute('data-key');
+            const item = cfg[key];
+            const mainSpan = el.querySelector('.ios-key-main');
+            if (!mainSpan || !item) return;
+            mainSpan.textContent = item.normal || key;
+            // 自适应字体大小：emoji/长文字自动缩小
+            adjustMainFontSize(mainSpan, item.normal || key);
+        });
+    }
+    /**
+     * 按下按钮时切换为按下文字
+     * @param {HTMLElement} el - 按钮元素
+     */
+    function setPressedText(el) {
+        const key = el.getAttribute('data-key');
+        if (!key) return;
+        const cfg = loadBtnTextConfig();
+        const item = cfg[key];
+        if (!item) return;
+        // 按下文字为空则不切换（与未按下相同）
+        if (!item.pressed) return;
+        const mainSpan = el.querySelector('.ios-key-main');
+        if (mainSpan) {
+            mainSpan.textContent = item.pressed;
+            adjustMainFontSize(mainSpan, item.pressed);
+        }
+    }
+    /**
+     * 松手时恢复默认文字
+     * @param {HTMLElement} el - 按钮元素
+     */
+    function setNormalText(el) {
+        const key = el.getAttribute('data-key');
+        if (!key) return;
+        const cfg = loadBtnTextConfig();
+        const item = cfg[key];
+        if (!item) return;
+        const mainSpan = el.querySelector('.ios-key-main');
+        if (mainSpan) {
+            mainSpan.textContent = item.normal || key;
+            adjustMainFontSize(mainSpan, item.normal || key);
+        }
+    }
+    /**
+     * 根据文字长度自适应按钮主文字的字体大小
+     * emoji 或超过2个字符时自动缩小
+     * @param {HTMLElement} span - .ios-key-main 元素
+     * @param {string} text - 文字内容
+     */
+    function adjustMainFontSize(span, text) {
+        if (!span) return;
+        const len = (text || '').length;
+        // emoji 检测：包含非 BMP 字符（codePoint > 0xFFFF）
+        let hasEmoji = false;
+        for (let i = 0; i < (text || '').length; i++) {
+            if ((text || '').charCodeAt(i) > 0xFFFF) { hasEmoji = true; break; }
+        }
+        if (hasEmoji || len <= 1) {
+            span.style.fontSize = 'inherit'; // 保持 CSS 默认（text-3xl）
+        } else if (len === 2) {
+            span.style.fontSize = '1.25rem'; // 20px
+        } else if (len === 3) {
+            span.style.fontSize = '1rem'; // 16px
+        } else {
+            span.style.fontSize = '0.875rem'; // 14px
+        }
+    }
+    // 页面加载时应用按钮文字
+    applyBtnTextConfig();
+    // 监听 storage 事件实时更新
+    window.addEventListener('storage', function(e) {
+        if (e.key === BTN_TEXT_KEY || !e.key) {
+            applyBtnTextConfig();
+        }
+    });
+    // 监听自定义 storage 事件（后台页面 dispatchEvent）
+    window.addEventListener('storage', function() {
+        applyBtnTextConfig();
+    });
+
     /**
      * 统一的按键释放清理函数
      * 所有松手事件（mouseup/mouseleave/touchend/touchcancel/keyup）都调用此函数
@@ -1678,6 +1789,8 @@ function initDialer() {
         if (labelElement) {
             labelElement.style.color = letterNormalColor;
         }
+        // 模式10：恢复默认按钮文字
+        setNormalText(keyElement);
 
         // 4. 隐藏按钮图片（带过渡动画）
         const imgContainer = keyElement.querySelector('.key-image-container');
@@ -2637,6 +2750,8 @@ function initDialer() {
             if (labelElement) {
                 labelElement.style.color = letterPressedColor;
             }
+            // 模式10：切换为按下文字
+            setPressedText(keyElement);
 
             // 显示按钮图片（旧图片系统，与模式5的 char-image-overlay 独立）
             const imgContainer = keyElement.querySelector('.key-image-container');

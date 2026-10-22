@@ -52,6 +52,19 @@
     @apply text-xs text-iosSecondText mt-1 min-h-[16px] leading-tight;
 }
 
+/* 按钮主文字 - 支持 emoji 和自定义内容 */
+.ios-key-main {
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    line-height: 1;
+    text-align: center;
+    word-break: break-all;
+    transition: font-size 0.15s ease;
+    /* emoji 和特殊字符居中 */
+    font-variant-emoji: text;
+}
+
 .ios-key-zero {
     @apply w-20 h-20 rounded-full bg-iosKey flex flex-col items-center justify-center text-iosText font-ios font-medium text-3xl transition-all duration-150 active:bg-gray-400;
     -webkit-user-select: none;

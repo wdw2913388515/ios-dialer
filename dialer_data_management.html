@@ -2339,6 +2339,102 @@
             });
             renderKeymapUI();
 
+            // ===== 模式10：自定义按钮文字 =====
+            const BTN_TEXT_KEY = 'dialerBtnTextConfig';
+            const BTN_TEXT_DEFAULT = {
+                '1': { normal: '1', pressed: '' },
+                '2': { normal: '2', pressed: '' },
+                '3': { normal: '3', pressed: '' },
+                '4': { normal: '4', pressed: '' },
+                '5': { normal: '5', pressed: '' },
+                '6': { normal: '6', pressed: '' },
+                '7': { normal: '7', pressed: '' },
+                '8': { normal: '8', pressed: '' },
+                '9': { normal: '9', pressed: '' },
+                '*': { normal: '*', pressed: '' },
+                '0': { normal: '0', pressed: '' },
+                '#': { normal: '#', pressed: '' }
+            };
+            /**
+             * 读取按钮文字配置
+             * @returns {Object} 12个按钮的文字配置对象
+             */
+            function loadBtnTextConfig() {
+                try {
+                    const raw = localStorage.getItem(BTN_TEXT_KEY);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        // 合并默认值，确保每个键都存在
+                        return Object.assign({}, BTN_TEXT_DEFAULT, parsed);
+                    }
+                } catch (e) {}
+                return JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT));
+            }
+            /**
+             * 保存按钮文字配置
+             * @param {Object} cfg - 按钮文字配置对象
+             */
+            function saveBtnTextConfig(cfg) {
+                try { localStorage.setItem(BTN_TEXT_KEY, JSON.stringify(cfg)); } catch (e) {}
+            }
+            /**
+             * 渲染模式10的12个按钮配置卡片
+             */
+            function renderBtnTextGrid() {
+                const grid = document.getElementById('btnTextGrid');
+                if (!grid) return;
+                const cfg = loadBtnTextConfig();
+                const keys = ['1','2','3','4','5','6','7','8','9','*','0','#'];
+                grid.innerHTML = keys.map(function(k) {
+                    const item = cfg[k] || { normal: k, pressed: '' };
+                    return '<div class="border border-gray-200 rounded-md p-2 bg-gray-50">' +
+                        '<div class="text-xs font-bold text-gray-600 mb-1 text-center">键 ' + k + '</div>' +
+                        '<div class="mb-1">' +
+                            '<label class="block text-[10px] text-gray-400 mb-0.5">未按下</label>' +
+                            '<input type="text" data-btn-key="' + k + '" data-btn-state="normal" value="' + (item.normal || '') + '" maxlength="8" class="w-full px-1.5 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-cyan-400 text-center">' +
+                        '</div>' +
+                        '<div>' +
+                            '<label class="block text-[10px] text-gray-400 mb-0.5">按下时</label>' +
+                            '<input type="text" data-btn-key="' + k + '" data-btn-state="pressed" value="' + (item.pressed || '') + '" maxlength="8" placeholder="同未按下" class="w-full px-1.5 py-1 text-xs border border-gray-200 rounded focus:outline-none focus:border-cyan-400 text-center">' +
+                        '</div>' +
+                    '</div>';
+                }).join('');
+                // 绑定输入事件
+                grid.querySelectorAll('input[data-btn-key]').forEach(function(input) {
+                    input.addEventListener('input', function() {
+                        const key = this.getAttribute('data-btn-key');
+                        const state = this.getAttribute('data-btn-state');
+                        const val = this.value;
+                        let current = loadBtnTextConfig();
+                        if (!current[key]) current[key] = { normal: key, pressed: '' };
+                        current[key][state] = val;
+                        saveBtnTextConfig(current);
+                        // 实时预览
+                        window.dispatchEvent(new Event('storage'));
+                    });
+                });
+            }
+            // 保存全部按钮
+            const saveAllBtn = document.getElementById('btnTextSaveAll');
+            if (saveAllBtn) {
+                saveAllBtn.addEventListener('click', function() {
+                    saveBtnTextConfig(loadBtnTextConfig());
+                    showNotification('按钮文字已保存 ✅');
+                    window.dispatchEvent(new Event('storage'));
+                });
+            }
+            // 全部恢复默认
+            const resetAllBtn = document.getElementById('btnTextResetAll');
+            if (resetAllBtn) {
+                resetAllBtn.addEventListener('click', function() {
+                    saveBtnTextConfig(JSON.parse(JSON.stringify(BTN_TEXT_DEFAULT)));
+                    renderBtnTextGrid();
+                    showNotification('已恢复默认按钮文字');
+                    window.dispatchEvent(new Event('storage'));
+                });
+            }
+            renderBtnTextGrid();
+
             /**
              * 更新已勾选文字展示区域
              * 遍历所有字符，将已勾选的文字逐个用框框选显示，同时管理➕按钮的启用状态。
@@ -7135,6 +7231,25 @@
         <div class="mt-3 p-3 bg-gray-50 rounded-md text-xs font-mono text-gray-600 leading-relaxed">
             <div class="mb-1"><span class="font-semibold text-gray-700">方案A：</span>1→1 2→2 3→3 4→4 5→5 6→6 7→7 8→8 9→9 i→* o→0 p→#</div>
             <div><span class="font-semibold text-gray-700">方案B：</span>1→1 2→2 3→3 q→4 w→5 e→6 a→7 s→8 d→9 z→* x→0 c→#</div>
+        </div>
+    </div>
+
+    <!-- ==================== 模式10：自定义按钮文字 ==================== -->
+    <div class="mt-6 p-4 border border-gray-200 rounded-lg bg-white">
+        <h3 class="text-base font-semibold mb-1">模式10：自定义按钮文字</h3>
+        <p class="text-xs text-gray-500 mb-3">
+            自定义12个按钮的主文字内容（支持 emoji），以及按下后的文字内容。按下文字留空则默认与未按下相同。
+        </p>
+        <div id="btnTextGrid" class="grid grid-cols-2 sm:grid-cols-3 md:grid-cols-4 lg:grid-cols-6 gap-2">
+            <!-- JS 动态生成 -->
+        </div>
+        <div class="mt-3 flex gap-2">
+            <button id="btnTextResetAll" class="px-3 py-1.5 text-xs bg-gray-100 hover:bg-gray-200 text-gray-700 rounded transition">
+                全部恢复默认
+            </button>
+            <button id="btnTextSaveAll" class="px-3 py-1.5 text-xs bg-cyan-500 hover:bg-cyan-600 text-white rounded transition">
+                保存全部
+            </button>
         </div>
     </div>
 </html>
