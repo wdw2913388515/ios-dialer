@@ -1788,6 +1788,29 @@ function initDialer() {
     }
     // 页面加载时应用按钮文字
     applyBtnTextConfig();
+    // ===== 模式11：按下缩小效果开关 =====
+    const PRESS_SHRINK_KEY = 'dialerPressShrink';
+    /**
+     * 应用按下缩小开关到 body 类名
+     * 后台开启时 body 加 .enable-press-shrink，CSS 自动激活 scale(0.95)
+     */
+    function applyPressShrinkSwitch() {
+        const enabled = localStorage.getItem(PRESS_SHRINK_KEY) === 'true';
+        if (enabled) {
+            document.body.classList.add('enable-press-shrink');
+        } else {
+            document.body.classList.remove('enable-press-shrink');
+        }
+    }
+    applyPressShrinkSwitch();
+    // 监听 storage 事件实时更新（后台改完开关立即生效）
+    window.addEventListener('storage', function() {
+        applyPressShrinkSwitch();
+    });
+    // 监听自定义 storage 事件（后台页面 dispatchEvent）
+    window.addEventListener('storage', function() {
+        applyPressShrinkSwitch();
+    });
     // 监听 storage 事件实时更新
     window.addEventListener('storage', function(e) {
         if (e.key === BTN_TEXT_KEY || !e.key) {

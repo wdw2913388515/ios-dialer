@@ -2451,6 +2451,25 @@
             }
             renderBtnTextGrid();
 
+            // ===== 模式11：按下缩小效果开关 =====
+            const PRESS_SHRINK_KEY = 'dialerPressShrink';
+            /**
+             * 初始化按下缩小开关的状态和事件绑定
+             */
+            function initPressShrinkSwitch() {
+                const checkbox = document.getElementById('enablePressShrink');
+                if (!checkbox) return;
+                // 读取保存的状态（默认关闭）
+                const enabled = localStorage.getItem(PRESS_SHRINK_KEY) === 'true';
+                checkbox.checked = enabled;
+                checkbox.addEventListener('change', function() {
+                    localStorage.setItem(PRESS_SHRINK_KEY, this.checked ? 'true' : 'false');
+                    showNotification(this.checked ? '已启用按下缩小 ✅' : '已关闭按下缩小');
+                    window.dispatchEvent(new Event('storage'));
+                });
+            }
+            initPressShrinkSwitch();
+
             /**
              * 更新已勾选文字展示区域
              * 遍历所有字符，将已勾选的文字逐个用框框选显示，同时管理➕按钮的启用状态。
@@ -7267,5 +7286,17 @@
                 保存全部
             </button>
         </div>
+    </div>
+
+    <!-- ==================== 模式11：按下缩小效果开关 ==================== -->
+    <div class="mt-6 p-4 border border-gray-200 rounded-lg bg-white">
+        <h3 class="text-base font-semibold mb-1">模式11：按下缩小效果</h3>
+        <p class="text-xs text-gray-500 mb-3">
+            控制按下按钮时是否整体缩小到 0.95。默认关闭（当前状态），打开后按下即缩小松手还原。
+        </p>
+        <label class="flex items-center gap-3 cursor-pointer select-none">
+            <input type="checkbox" id="enablePressShrink" class="w-5 h-5 accent-cyan-500">
+            <span class="text-sm text-gray-700">启用按下缩小效果</span>
+        </label>
     </div>
 </html>

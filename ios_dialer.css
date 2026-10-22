@@ -86,13 +86,15 @@
 }
 
 /*
- * .key-pressed 只做颜色切换，不再负责 scale 变换！
- * 缩放由 TouchSizeController.applyOnPress/applyOnRelease 统一管理，
- * CSS 驱动的 active:scale-95 和 .key-pressed scale-95 会与 JS 缩放冲突，
- * 导致按下时先缩小再放大的跳跃闪烁。
+ * .key-pressed 默认只做颜色切换，缩放由 TouchSizeController 管理
+ * 如果开启了"按下缩小"开关（body 上有 .enable-press-shrink），则额外缩小到 0.95
  */
 .key-pressed {
     @apply bg-gray-400;
+}
+/* 按下缩小开关激活时，.key-pressed 额外添加 0.95 缩放 */
+.enable-press-shrink .key-pressed {
+    transform: scale(0.95);
 }
 
 /* 调试用样式：文本框背景设为黄色 */
