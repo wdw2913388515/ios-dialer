@@ -1645,12 +1645,18 @@ function initDialer() {
     // ===== 模式10：自定义按钮文字 =====
     const BTN_TEXT_KEY = 'dialerBtnTextConfig';
     const BTN_TEXT_DEFAULT = {
-        '1': { normal: '1', pressed: '' }, '2': { normal: '2', pressed: '' },
-        '3': { normal: '3', pressed: '' }, '4': { normal: '4', pressed: '' },
-        '5': { normal: '5', pressed: '' }, '6': { normal: '6', pressed: '' },
-        '7': { normal: '7', pressed: '' }, '8': { normal: '8', pressed: '' },
-        '9': { normal: '9', pressed: '' }, '*': { normal: '*', pressed: '' },
-        '0': { normal: '0', pressed: '' }, '#': { normal: '#', pressed: '' }
+        '1': { normal: '1', pressed: '', label: '阿凸目' },
+        '2': { normal: '2', pressed: '', label: 'ABC' },
+        '3': { normal: '3', pressed: '', label: 'DEF' },
+        '4': { normal: '4', pressed: '', label: 'GHI' },
+        '5': { normal: '5', pressed: '', label: 'JKL' },
+        '6': { normal: '6', pressed: '', label: 'MNO' },
+        '7': { normal: '7', pressed: '', label: 'PQRS' },
+        '8': { normal: '8', pressed: '', label: 'TUV' },
+        '9': { normal: '9', pressed: '', label: 'WXYZ' },
+        '*': { normal: '*', pressed: '', label: '' },
+        '0': { normal: '0', pressed: '', label: '+' },
+        '#': { normal: '#', pressed: '', label: '' }
     };
     /**
      * 读取按钮文字配置
@@ -1675,11 +1681,30 @@ function initDialer() {
         keyElements.forEach(function(el) {
             const key = el.getAttribute('data-key');
             const item = cfg[key];
+            if (!item) return;
+            // 主文字
             const mainSpan = el.querySelector('.ios-key-main');
-            if (!mainSpan || !item) return;
-            mainSpan.textContent = item.normal || key;
-            // 自适应字体大小：emoji/长文字自动缩小
-            adjustMainFontSize(mainSpan, item.normal || key);
+            if (mainSpan) {
+                mainSpan.textContent = item.normal || key;
+                adjustMainFontSize(mainSpan, item.normal || key);
+            }
+            // 字母标签（.ios-key-label）
+            const labelEl = el.querySelector('.ios-key-label');
+            if (labelEl) {
+                if (item.label) {
+                    labelEl.textContent = item.label;
+                    labelEl.style.display = '';
+                } else {
+                    labelEl.textContent = '';
+                    labelEl.style.display = 'none';
+                }
+            } else if (item.label) {
+                // 没有 label 元素但有 label 配置 → 动态创建
+                const newLabel = document.createElement('div');
+                newLabel.className = 'ios-key-label';
+                newLabel.textContent = item.label;
+                el.appendChild(newLabel);
+            }
         });
     }
     /**
